@@ -1,0 +1,17 @@
+# Monthly bare-runner verification that `make bootstrap` stays ≤ 15 min
+# (NFR-M-1, Ch. 9 F-1). LIVE from Sprint 0.
+name: bootstrap-timing
+on:
+  schedule: [{ cron: "0 6 1 * *" }]
+  workflow_dispatch:
+jobs:
+  time-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15   # the SLA is the timeout — breach fails the job
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: make bootstrap
+      - run: make test

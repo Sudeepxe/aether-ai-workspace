@@ -1,0 +1,43 @@
+# ---- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# ---- Node / web ------------------------------------------------------------
+node_modules/
+apps/web/dist/
+.vite/
+
+# ---- Environment & secrets -------------------------------------------------
+# Only the example contract is committed (see SPRINT_0_PLAN §15).
+.env
+.env.*
+!.env.example
+# Decrypted SOPS output must never be committed (ADR-7.5).
+infra/secrets/*.dec.*
+infra/secrets/decrypted/
+
+# ---- Generated artifacts rebuilt by CI -------------------------------------
+# EXCEPTION (documented per Sprint 0 self-review F-3): packages/contracts/
+# holds COMMITTED generated files (OpenAPI spec, TS types) because ADR-9.2
+# requires the generated contract to be committed and diffed in CI.
+docs/architecture/rendered/
+
+# ---- Docker ----------------------------------------------------------------
+compose.override.yml
+
+# ---- IDE / OS noise --------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+.DS_Store

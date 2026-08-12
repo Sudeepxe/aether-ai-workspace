@@ -1,0 +1,7 @@
+# Solo project; team-shaped configuration (ADR-9.4).
+# Default owner for everything:
+* @sudeepc380
+
+# Directories where unreviewed change is most dangerous (SPRINT_0_PLAN §7):
+/docs/adr/ @sudeepc380
+/.github/workflows/ @sudeepc380

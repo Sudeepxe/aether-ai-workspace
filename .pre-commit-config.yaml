@@ -1,0 +1,28 @@
+# Hooks are convenience; CI re-runs everything and is the authority
+# (SPRINT_0_PLAN §17). Order matters: format before lint.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff-format
+        files: ^apps/api/
+      - id: ruff
+        args: [--fix]
+        files: ^apps/api/
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+  - repo: local
+    hooks:
+      - id: import-boundaries
+        name: import boundaries (Blueprint §3.3)
+        entry: bash -c 'cd apps/api && uv run lint-imports --config pyproject.toml'
+        language: system
+        pass_filenames: false
+        files: ^apps/api/src/

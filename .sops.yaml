@@ -1,0 +1,5 @@
+# SOPS configuration (ADR-7.5). Replace the placeholder recipient with your
+# age public key during machine bootstrap (see infra/secrets/README.md).
+creation_rules:
+  - path_regex: infra/secrets/.*\.enc\.yaml$
+    age: "age1PLACEHOLDER_REPLACE_DURING_BOOTSTRAP"

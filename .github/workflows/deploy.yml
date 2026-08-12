@@ -1,0 +1,11 @@
+# Deploy pipeline stub (D10-2). Sprint 0: build/sign/push shape only,
+# manual trigger. SSH rolling deploy + auto-rollback land in S11.
+name: deploy
+on: [workflow_dispatch]
+jobs:
+  build-sign-push:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write, id-token: write }
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "S11 — build, SBOM (syft), cosign sign, push to GHCR by digest, SSH deploy"

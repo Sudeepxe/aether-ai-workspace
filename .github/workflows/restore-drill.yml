@@ -1,0 +1,11 @@
+# Quarterly restore drill = ephemeral staging provisioner (ADR-10.3).
+# Skeleton — ENABLED IN S11.
+name: restore-drill
+on:
+  schedule: [{ cron: "0 4 1 */3 *" }]
+  workflow_dispatch:
+jobs:
+  drill:
+    if: ${{ false }}   # ENABLED IN S11 — restore snapshot, run e2e, assert RLS + RTO
+    runs-on: ubuntu-latest
+    steps: [{ run: "echo enabled in S11" }]

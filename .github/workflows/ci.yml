@@ -1,0 +1,116 @@
+# Aether CI (SPRINT_0_PLAN §13). The full pipeline SHAPE ships in Sprint 0;
+# lanes for systems that don't exist yet are disabled with `if: false` and a
+# comment naming their enabling sprint (Sprint 0 self-review F-1).
+#
+# NOTE(S0): actions are version-pinned; commit-SHA pinning is a tracked
+# Sprint 0 follow-up issue ("SHA-pin all actions") per Ch. 9 F-3 — done
+# before branch protection marks these checks required.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Python lint + format + import boundaries
+        working-directory: apps/api
+        run: |
+          uv sync
+          uv run ruff format --check .
+          uv run ruff check .
+          uv run lint-imports --config pyproject.toml
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: apps/web/package-lock.json }
+      - name: Web lint + typecheck
+        working-directory: apps/web
+        run: |
+          npm ci || npm install
+          npm run lint
+          npm run typecheck
+      - name: Python typecheck (mypy --strict)
+        working-directory: apps/api
+        run: uv run mypy
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Unit + architecture tests
+        working-directory: apps/api
+        run: |
+          uv sync
+          uv run pytest -m "unit or architecture" --cov --cov-report=xml
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: |
+          docker build -f infra/docker/api.Dockerfile -t aether-api:ci .
+          docker build -f infra/docker/web.Dockerfile -t aether-web:ci .
+      - name: Scan images (trivy)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: aether-api:ci
+          severity: CRITICAL
+          exit-code: "1"
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # gitleaks scans full history
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: astral-sh/setup-uv@v3
+      - name: Dependency audit
+        working-directory: apps/api
+        run: |
+          uv sync
+          uv export --no-dev --format requirements-txt > /tmp/reqs.txt
+          uv tool run pip-audit -r /tmp/reqs.txt
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Markdown link check
+        uses: lycheeverse/lychee-action@v1.10.0
+        with:
+          args: --no-progress --offline docs README.md
+          fail: true
+
+  # ---- future lanes: shape visible, disabled until their sprint ------------
+  integration:
+    if: ${{ false }}   # ENABLED IN S1 — testcontainers PG/Redis, RLS suite, migrations N-1
+    runs-on: ubuntu-latest
+    steps: [{ run: "echo enabled in S1" }]
+
+  e2e:
+    if: ${{ false }}   # ENABLED IN S3 — Playwright vs test-profile compose
+    runs-on: ubuntu-latest
+    steps: [{ run: "echo enabled in S3" }]
+
+  eval-smoke:
+    if: ${{ false }}   # ENABLED IN S7 — 20-case golden smoke, path-filtered (§6.4)
+    runs-on: ubuntu-latest
+    steps: [{ run: "echo enabled in S7" }]
+
+  perf-smoke:
+    if: ${{ false }}   # ENABLED IN S9 — k6 relative-regression budgets (ADR-2.4)
+    runs-on: ubuntu-latest
+    steps: [{ run: "echo enabled in S9" }]

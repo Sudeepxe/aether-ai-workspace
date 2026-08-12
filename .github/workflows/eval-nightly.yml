@@ -1,0 +1,10 @@
+# Nightly full eval (150 cases, §6.4). Skeleton — ENABLED IN S7.
+name: eval-nightly
+on:
+  schedule: [{ cron: "0 3 * * *" }]
+  workflow_dispatch:
+jobs:
+  full-eval:
+    if: ${{ false }}   # ENABLED IN S7 — requires evals/harness + budgeted provider keys
+    runs-on: ubuntu-latest
+    steps: [{ run: "echo enabled in S7" }]
