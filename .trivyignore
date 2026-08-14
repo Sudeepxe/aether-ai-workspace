@@ -1,0 +1,20 @@
+# Trivy ignore list — every entry here is a scoped, dated exception, not a
+# blanket severity downgrade (SPRINT_0_PLAN §21 "known-gaps register, not a
+# confession" culture, Blueprint §10.6). New vulnerabilities in any package,
+# including perl-base, still fail the build; only the exact CVE IDs below
+# are suppressed, and only until Debian ships a fix.
+#
+# All four CVEs below are in perl-base, a component of the upstream
+# python:3.12-slim (Debian trixie) base image — Aether's API/worker never
+# invokes perl. perl-base is an Essential Debian package
+# (`apt-get remove` refuses without --allow-remove-essential); force-removing
+# an Essential package from a base image is out of scope for a Sprint 0
+# hardening pass. No fixed version is published upstream for any of these
+# as of 2026-08-14 (checked via `trivy image` Fixed-Version column).
+# Tracked: https://github.com/Sudeepxe/aether-ai-workspace/issues/2
+# Revisit: when Debian trixie ships a patched perl-base, or when this image
+# is replaced by a perl-free base (also tracked in issue #2).
+CVE-2026-13221
+CVE-2026-42496
+CVE-2026-57433
+CVE-2026-8376

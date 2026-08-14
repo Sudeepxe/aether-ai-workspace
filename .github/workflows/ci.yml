@@ -13,6 +13,11 @@ on:
   push:
     branches: [main]
 
+# Least-privilege default; the security job overrides to add pull-requests:
+# read, which gitleaks-action needs to list commits on pull_request events.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -67,15 +72,20 @@ jobs:
           image-ref: aether-api:ci
           severity: CRITICAL
           exit-code: "1"
+          trivyignores: .trivyignore
       - name: Scan web image (trivy)
         uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
         with:
           image-ref: aether-web:ci
           severity: CRITICAL
           exit-code: "1"
+          trivyignores: .trivyignore
 
   security:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read   # gitleaks-action lists PR commits via the API on pull_request events
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { fetch-depth: 0 }   # gitleaks scans full history
