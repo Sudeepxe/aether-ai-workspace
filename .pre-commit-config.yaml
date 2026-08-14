@@ -1,5 +1,6 @@
 # Hooks are convenience; CI re-runs everything and is the authority
-# (SPRINT_0_PLAN §17). Order matters: format before lint.
+# (SPRINT_0_PLAN §17). Order: ruff-format -> ruff -> mypy -> eslint/prettier
+# -> import-boundary -> gitleaks -> commit-lint -> .env.example drift guard.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.9
@@ -9,6 +10,32 @@ repos:
       - id: ruff
         args: [--fix]
         files: ^apps/api/
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy --strict (apps/api)
+        entry: bash -c 'cd apps/api && uv run mypy'
+        language: system
+        pass_filenames: false
+        files: ^apps/api/src/
+      - id: eslint
+        name: eslint (apps/web)
+        entry: bash -c 'cd apps/web && npm run lint'
+        language: system
+        pass_filenames: false
+        files: ^apps/web/src/
+      - id: prettier
+        name: prettier --check (apps/web)
+        entry: bash -c 'cd apps/web && npm run format:check'
+        language: system
+        pass_filenames: false
+        files: ^apps/web/src/
+      - id: import-boundaries
+        name: import boundaries (Blueprint §3.3)
+        entry: bash -c 'cd apps/api && uv run lint-imports --config pyproject.toml'
+        language: system
+        pass_filenames: false
+        files: ^apps/api/src/
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.4
     hooks:
@@ -20,9 +47,9 @@ repos:
         stages: [commit-msg]
   - repo: local
     hooks:
-      - id: import-boundaries
-        name: import boundaries (Blueprint §3.3)
-        entry: bash -c 'cd apps/api && uv run lint-imports --config pyproject.toml'
+      - id: env-example-drift
+        name: .env.example drift guard
+        entry: make env-check
         language: system
         pass_filenames: false
-        files: ^apps/api/src/
+        files: ^(\.env|\.env\.example)$

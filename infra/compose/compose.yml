@@ -2,11 +2,13 @@
 #   dev  — infra services for local development (functional in Sprint 0)
 #   app  — api/worker containers built from source (functional from S1)
 #   demo/test — declared in SPRINT_0_PLAN §14; land S9–S11.
+# Images pinned by digest, in `image:tag@digest` form (Ch. 10 F-1
+# discipline: no `latest`, no mutable tags). Digests captured 2026-08-14.
 name: aether
 
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
     profiles: ["dev"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-aether}
@@ -21,7 +23,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
     profiles: ["dev"]
     ports: ["6379:6379"]
     healthcheck:
@@ -31,7 +33,7 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z@sha256:6f23072e3e222e64fe6f86b31a7f7aca971e5129e55cbccef649b109b8e651a1
     profiles: ["dev"]
     command: server /data --console-address ":9001"
     environment:
@@ -46,7 +48,7 @@ services:
       retries: 10
 
   mailpit:
-    image: axllent/mailpit:v1.20
+    image: axllent/mailpit:v1.20@sha256:7eef0f38dbc85e4e264f2edf5d70fbb694826791e05cb2cae4fc9e3282f968f5
     profiles: ["dev"]
     ports: ["8025:8025", "1025:1025"]
     healthcheck:
