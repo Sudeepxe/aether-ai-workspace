@@ -7,6 +7,11 @@ and a library swap (e.g. a different JWT library) never touches app code.
 ClockPort/IdPort are named explicitly in the blueprint's own port catalog
 (§3.3 diagram); PasswordHasherPort/TokenPort are natural extensions of the
 same pattern for Sprint 1's needs.
+
+Also re-exports InvalidAccessTokenError: adapters are forbidden from
+importing aether.domain directly (import-linter contract, "Adapters
+depend only on ports"), so ports is the one doorway through which the
+token adapter reaches the domain error it raises on verification failure.
 """
 
 from __future__ import annotations
@@ -15,6 +20,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
+
+from aether.domain.errors import InvalidAccessTokenError
+
+__all__ = [
+    "AccessTokenClaims",
+    "ClockPort",
+    "IdPort",
+    "InvalidAccessTokenError",
+    "PasswordHasherPort",
+    "TokenPort",
+]
 
 
 class PasswordHasherPort(Protocol):

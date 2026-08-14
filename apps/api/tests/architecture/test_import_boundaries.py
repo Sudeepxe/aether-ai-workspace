@@ -3,15 +3,22 @@
 Runs import-linter's contracts as a pytest so boundary violations fail the
 ordinary test run, not only the lint lane. This is the Sprint 0 'one real
 test per harness' for the architecture layer (SPRINT_0_PLAN §18).
+
+Calls importlinter.cli.lint_imports() in-process rather than shelling out
+to `python -m importlinter.cli` — the package ships no `__main__.py`, so
+that invocation silently does nothing and always exits 0 (discovered
+during Sprint 1: this test had never actually caught a violation since
+it was written in Sprint 0). lint_imports() here is the same function
+the `lint-imports` console script calls internally, just without the
+Click/sys.exit wrapper around it.
 """
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from importlinter.cli import lint_imports
 
 pytestmark = pytest.mark.architecture
 
@@ -19,11 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_import_contracts_hold() -> None:
-    result = subprocess.run(  # fixed argv, no user input
-        [sys.executable, "-m", "importlinter.cli", "lint", "--config", "pyproject.toml"],
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+    exit_code = lint_imports(config_filename=str(PROJECT_ROOT / "pyproject.toml"))
+    assert exit_code == 0, (
+        "import-linter contracts violated — run `uv run lint-imports` for details"
     )
-    assert result.returncode == 0, f"Import contracts violated:\n{result.stdout}\n{result.stderr}"

@@ -119,6 +119,14 @@ forbidden_modules = [
   "aether.app", "aether.http", "aether.workers",
   "aether.domain", "aether.modules",
 ]
+# Ports (e.g. UserRepositoryPort.create() -> User) are typed against
+# domain entities/errors, so an adapter implementing a port transitively
+# reaches domain through it — ports re-export the specific domain types
+# each adapter needs (see ports/repositories.py, ports/security.py) so
+# that's the only doorway. This flag scopes the contract to what "ports
+# only" is actually enforcing: no adapter file may write
+# `from aether.domain import ...` directly.
+allow_indirect_imports = true
 
 # --------------------------------------------------------------- pytest ----
 [tool.pytest.ini_options]

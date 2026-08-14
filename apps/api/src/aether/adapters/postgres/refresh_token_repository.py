@@ -7,7 +7,7 @@ from uuid import UUID
 
 import asyncpg
 
-from aether.domain.entities import RefreshToken
+from aether.ports.repositories import RefreshToken
 
 
 class PostgresRefreshTokenRepository:

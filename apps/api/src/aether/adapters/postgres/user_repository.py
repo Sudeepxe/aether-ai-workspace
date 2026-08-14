@@ -11,8 +11,7 @@ from uuid import UUID
 
 import asyncpg
 
-from aether.domain.entities import User
-from aether.domain.errors import EmailAlreadyRegisteredError
+from aether.ports.repositories import EmailAlreadyRegisteredError, User
 
 
 class PostgresUserRepository:

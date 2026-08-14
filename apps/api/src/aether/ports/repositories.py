@@ -2,6 +2,12 @@
 
 Protocol-based, not ABCs — app depends on these interfaces; adapters
 (Postgres, or fakes in unit tests) implement them structurally.
+
+Also re-exports the domain vocabulary these ports traffic in (User,
+RefreshToken, EmailAlreadyRegisteredError): adapters are forbidden from
+importing aether.domain directly (import-linter contract, "Adapters
+depend only on ports"), so ports is the one doorway through which an
+adapter reaches domain types it must construct or raise.
 """
 
 from __future__ import annotations
@@ -11,6 +17,15 @@ from typing import Protocol
 from uuid import UUID
 
 from aether.domain.entities import RefreshToken, User
+from aether.domain.errors import EmailAlreadyRegisteredError
+
+__all__ = [
+    "EmailAlreadyRegisteredError",
+    "RefreshToken",
+    "RefreshTokenRepositoryPort",
+    "User",
+    "UserRepositoryPort",
+]
 
 
 class UserRepositoryPort(Protocol):

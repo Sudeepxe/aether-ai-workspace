@@ -28,8 +28,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-from aether.domain.errors import InvalidAccessTokenError
-from aether.ports.security import AccessTokenClaims
+from aether.ports.security import AccessTokenClaims, InvalidAccessTokenError
 
 _ALGORITHM = "EdDSA"
 
