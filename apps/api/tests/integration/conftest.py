@@ -84,7 +84,9 @@ async def db_bootstrap_pool(postgres_url: str) -> AsyncIterator[asyncpg.Pool]:
 
 @pytest.fixture()
 async def redis_client(redis_url: str) -> AsyncIterator[redis_asyncio.Redis]:
-    client = redis_asyncio.from_url(redis_url, decode_responses=True)
+    client = redis_asyncio.from_url(  # type: ignore[no-untyped-call]  # redis-py gap, not ours
+        redis_url, decode_responses=True
+    )
     try:
         yield client
     finally:

@@ -19,7 +19,7 @@ def test_defaults_are_dev_safe() -> None:
 def test_settings_are_frozen() -> None:
     s = Settings()
     with pytest.raises(ValidationError):
-        s.env = "prod"  # type: ignore[misc]
+        s.env = "prod"
 
 
 def test_env_prefix_is_respected(monkeypatch: pytest.MonkeyPatch) -> None:

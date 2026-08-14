@@ -8,7 +8,7 @@ license = { text = "Apache-2.0" }
 dependencies = [
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.30,<1",
-  "pydantic>=2.8,<3",
+  "pydantic[email]>=2.8,<3",
   "pydantic-settings>=2.4,<3",
   "structlog>=24.1,<25",
   "asyncpg>=0.29,<1",
@@ -65,6 +65,11 @@ ignore = ["E501"]  # line length handled by formatter
   "S101",         # assert is the point of tests
   "S105", "S106", # fixture literals like "wrong-password" aren't credentials
 ]
+"src/aether/http/**" = [
+  "B008", # Depends(...)/Header(...)/Cookie(...) as argument defaults is
+          # FastAPI's own documented DI idiom, not the mutable-default-
+          # argument footgun this rule exists to catch.
+]
 
 # ---------------------------------------------------------------- mypy -----
 [tool.mypy]
@@ -79,6 +84,11 @@ show_error_codes = true
 # for that one package rather than loosening strict mode repo-wide.
 [[tool.mypy.overrides]]
 module = "asyncpg.*"
+ignore_missing_imports = true
+
+# testcontainers ships no py.typed marker either (integration tests only).
+[[tool.mypy.overrides]]
+module = "testcontainers.*"
 ignore_missing_imports = true
 
 # -------------------------------------------------------- import-linter ----
