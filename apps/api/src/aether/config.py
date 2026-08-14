@@ -1,8 +1,10 @@
 """Application settings — environment-driven, 12-factor (Blueprint §3.9.2).
 
-Sprint 0 scope: only what the bootstrap skeleton needs. Every future
-variable must also appear in the repo-root ``.env.example`` (drift guard
-in ``make lint``, SPRINT_0_PLAN §15).
+Every variable read here must also appear in the repo-root ``.env.example``
+(drift guard in ``make lint``, SPRINT_0_PLAN §15). Dev-safe defaults follow
+the same posture as the existing ``POSTGRES_PASSWORD``/``MINIO_ROOT_PASSWORD``
+values: committed, non-secret, dev-profile-only — real values come from the
+SOPS bundle (ADR-7.5), never from a committed ``.env``.
 """
 
 from __future__ import annotations
@@ -21,6 +23,21 @@ class Settings(BaseSettings):
     env: Literal["dev", "test", "staging", "prod"] = "dev"
     service_name: str = "aether-api"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+    # --- data layer (Sprint 1) -----------------------------------------
+    database_url: str = "postgresql://aether:aether-dev-only@localhost:5432/aether"
+    redis_url: str = "redis://localhost:6379/0"
+
+    # --- auth / JWT (Sprint 1, ADR-7.2) ---------------------------------
+    # Base64-encoded raw Ed25519 seed. The value below is a dev-only key,
+    # generated for this scaffold and safe to commit (mirrors the existing
+    # dev-default posture); it signs nothing that matters outside a local
+    # `dev` compose profile. Prod overrides this via the SOPS bundle.
+    jwt_signing_key: str = "ENa+PofIf23y5gFynYezonUkV5iu0pgeEe/PHlqCG4E="
+    jwt_kid: str = "dev-1"
+    jwt_access_ttl_seconds: int = 900
+    jwt_refresh_ttl_seconds: int = 604_800
+    jwt_refresh_grace_seconds: int = 30
 
 
 @lru_cache(maxsize=1)
