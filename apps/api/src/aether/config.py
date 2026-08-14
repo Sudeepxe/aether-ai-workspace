@@ -25,7 +25,14 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     # --- data layer (Sprint 1) -----------------------------------------
-    database_url: str = "postgresql://aether:aether-dev-only@localhost:5432/aether"
+    # The running API/worker connect as the least-privileged `app_api`
+    # role (ADR-8.1) — subject to RLS like any other application code, not
+    # exempt from it. Migrations connect separately (database_migrator_url)
+    # using the bootstrap role that has DDL rights, since app_migrator
+    # doesn't yet have its own deploy-pipeline connection path (that's an
+    # S11 concern) — see migrations/env.py.
+    database_url: str = "postgresql://app_api:app-api-dev-only@localhost:5432/aether"
+    database_migrator_url: str = "postgresql://aether:aether-dev-only@localhost:5432/aether"
     redis_url: str = "redis://localhost:6379/0"
 
     # --- auth / JWT (Sprint 1, ADR-7.2) ---------------------------------

@@ -18,6 +18,7 @@ dependencies = [
   "cryptography>=43.0,<44",
   "uuid-utils>=0.9,<1",
   "alembic>=1.13,<2",
+  "greenlet>=3.0,<4",  # required by SQLAlchemy's async engine (Alembic's migration runner, migrations/env.py)
 ]
 
 [dependency-groups]
