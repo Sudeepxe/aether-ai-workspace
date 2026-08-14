@@ -61,7 +61,10 @@ select = [
 ignore = ["E501"]  # line length handled by formatter
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # assert is the point of tests
+"tests/**" = [
+  "S101",         # assert is the point of tests
+  "S105", "S106", # fixture literals like "wrong-password" aren't credentials
+]
 
 # ---------------------------------------------------------------- mypy -----
 [tool.mypy]
@@ -71,6 +74,12 @@ mypy_path = "src"
 packages = ["aether"]
 warn_unreachable = true
 show_error_codes = true
+
+# asyncpg ships no py.typed marker / stubs (Sprint 1) — narrowly silenced
+# for that one package rather than loosening strict mode repo-wide.
+[[tool.mypy.overrides]]
+module = "asyncpg.*"
+ignore_missing_imports = true
 
 # -------------------------------------------------------- import-linter ----
 # Enforces Blueprint §3.3: domain imports nothing internal; layered flow
