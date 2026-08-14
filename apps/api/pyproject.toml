@@ -139,4 +139,4 @@ source = ["src/aether"]
 omit = ["src/aether/adapters/*"]  # vendor-glue exclusion, justified in SPRINT_0_PLAN §18
 
 [tool.coverage.report]
-fail_under = 0  # raised to 80 in S1 when domain logic exists (NFR-M-1)
+fail_under = 80  # NFR-M-1; combined unit+architecture+integration+security run is at 94%
