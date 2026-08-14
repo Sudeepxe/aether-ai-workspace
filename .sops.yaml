@@ -1,5 +1,8 @@
-# SOPS configuration (ADR-7.5). Replace the placeholder recipient with your
-# age public key during machine bootstrap (see infra/secrets/README.md).
+# SOPS configuration (ADR-7.5). The recipient below is a Sprint 0 DEMO key
+# (age1cp55...) that proves the encrypt/decrypt mechanism end-to-end — see
+# infra/secrets/README.md. It holds no real secret. Replace it with your own
+# age public key (`age-keygen`) during your own machine bootstrap; re-encrypt
+# infra/secrets/*.enc.yaml to the new recipient with `make secrets-edit`.
 creation_rules:
   - path_regex: infra/secrets/.*\.enc\.yaml$
-    age: "age1PLACEHOLDER_REPLACE_DURING_BOOTSTRAP"
+    age: "age1cp55xs9efll05fv2wcjmhxqhzlssnvgy8garz7lr9q7ue0ht6ags9knfx0"

@@ -7,7 +7,10 @@
 FROM python:3.12-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.4.18 /uv /usr/local/bin/uv
 WORKDIR /build
-COPY apps/api/pyproject.toml apps/api/uv.lock* ./
+# README.md must be present before the first `uv sync`: pyproject.toml
+# declares it as the package readme, and hatchling validates the file
+# exists while resolving project metadata, even with --no-install-project.
+COPY apps/api/pyproject.toml apps/api/uv.lock* apps/api/README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --no-install-project || uv sync --no-dev --no-install-project --no-cache
 COPY apps/api/src ./src
