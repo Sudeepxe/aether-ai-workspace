@@ -4,9 +4,12 @@
 # artifact/scan purposes and local preview.
 # Base images pinned by digest, in `image:tag@digest` form so the tag
 # stays human-readable next to the immutable pin (Ch. 10 F-1 discipline:
-# no `latest`, no mutable tags). Digests captured 2026-08-14.
+# no `latest`, no mutable tags). Digests captured 2026-08-14, node image
+# bumped to 22-slim 2026-08-15 (Sprint 3): jsdom/testing-library's latest
+# majors require Node >=22, and Node 20 is past its LTS window by this
+# date anyway — this is a currency fix, not a scope change.
 
-FROM node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS builder
+FROM node:22-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS builder
 WORKDIR /build
 COPY apps/web/package.json apps/web/package-lock.json* ./
 RUN --mount=type=cache,target=/root/.npm npm ci

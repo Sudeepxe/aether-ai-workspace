@@ -6,7 +6,7 @@ Conventional-Commit title.
 
 ## Setup
 
-Prereqs: Docker + compose v2, [uv](https://docs.astral.sh/uv/), Node 20 LTS,
+Prereqs: Docker + compose v2, [uv](https://docs.astral.sh/uv/), Node 22 LTS,
 make, sops + age, git ≥ 2.40. Then `make bootstrap` (target ≤ 15 min).
 
 ## Conventions
