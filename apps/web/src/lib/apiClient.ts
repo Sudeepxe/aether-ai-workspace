@@ -33,7 +33,7 @@ interface ProblemJson {
   correlation_id?: string;
 }
 
-async function toApiError(response: Response): Promise<ApiError> {
+export async function toApiError(response: Response): Promise<ApiError> {
   let problem: ProblemJson = {};
   try {
     problem = (await response.clone().json()) as ProblemJson;

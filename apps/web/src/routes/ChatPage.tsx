@@ -1,5 +1,6 @@
 import { Composer } from "../components/Composer";
 import { MessageList } from "../components/MessageList";
+import { UsageIndicator } from "../components/UsageIndicator";
 import { useLogout } from "../hooks/useAuth";
 import { useSendMessage } from "../hooks/useSendMessage";
 import { useWorkspaceBootstrap } from "../hooks/useWorkspaceBootstrap";
@@ -55,6 +56,7 @@ function ChatThread({
       <header className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
         <h1 className="text-sm font-semibold text-neutral-900">Aether</h1>
         <div className="flex items-center gap-3 text-sm text-neutral-500">
+          <UsageIndicator workspaceId={workspaceId} />
           <span>{userLabel}</span>
           <button type="button" onClick={onLogout} className="hover:text-neutral-900">
             Sign out

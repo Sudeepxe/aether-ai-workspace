@@ -22,17 +22,27 @@ test("register, log in, send a message, and see the streamed echo settle", async
   await expect(page).toHaveURL(/\/chat$/, { timeout: 15_000 });
   await expect(page.getByText("Setting up your workspace…")).toHaveCount(0, { timeout: 15_000 });
 
+  // CreateWorkspace provisions a default $5.00/mo budget (issue #34) —
+  // proves GET /budget renders through a real browser, not just a unit
+  // test against a fake. EchoGenerator's cost is always zero, so this
+  // stays $0.00 even after the message below settles.
+  await expect(page.getByText("$0.00 / $5.00")).toBeVisible({ timeout: 10_000 });
+
   const composer = page.getByLabel("Message");
   await composer.fill("hello from playwright");
   await page.getByRole("button", { name: "Send" }).click();
 
-  // The user's own message renders immediately (optimistic-equivalent:
-  // it comes back from the same POST that starts the stream).
-  await expect(page.getByText("hello from playwright")).toBeVisible();
+  // The user's own message renders (seq order puts it before the
+  // reply). Scoped with .first(): EchoGenerator echoes the identical
+  // text back, so once the reply settles both bubbles match this text —
+  // asserting plain visibility (without .first()) is a real race that
+  // flakes once the round-trip is fast enough to settle before this
+  // check runs, not just a pre-existing one waiting for the assistant.
+  await expect(page.getByText("hello from playwright").first()).toBeVisible();
 
   // The streamed echo reply appears and grows — proves tokens are
   // actually arriving incrementally, not just the final settled text.
-  await expect(page.locator("text=hello from playwright").nth(1)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("hello from playwright").nth(1)).toBeVisible({ timeout: 10_000 });
 
   // Settled: the "Send" button reappears (Composer only shows "Stop"
   // while streaming) and the reply is the full echoed content with no
