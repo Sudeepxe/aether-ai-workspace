@@ -88,9 +88,16 @@ services:
       # starting these services.
       AETHER_DATABASE_URL: postgresql://app_api:app-api-dev-only@postgres:5432/${POSTGRES_DB:-aether}
       AETHER_DATABASE_MIGRATOR_URL: postgresql://${POSTGRES_USER:-aether}:${POSTGRES_PASSWORD:-aether-dev-only}@postgres:5432/${POSTGRES_DB:-aether}
+      # app_worker (ADR-8.1, least privilege) — the worker's own outbox
+      # dispatch (Sprint 2, ADR-11.1) connects as this role, not app_api.
+      AETHER_DATABASE_WORKER_URL: postgresql://app_worker:app-worker-dev-only@postgres:5432/${POSTGRES_DB:-aether}
       AETHER_REDIS_URL: redis://redis:6379/0
+      AETHER_EMAIL_PROVIDER: smtp
+      AETHER_SMTP_HOST: mailpit
+      AETHER_SMTP_PORT: "1025"
     depends_on:
       postgres: { condition: service_healthy }
+      mailpit: { condition: service_healthy }
       redis: { condition: service_healthy }
 
 volumes:

@@ -9,9 +9,11 @@ from aether.app.auth.tokens import hash_token
 from aether.app.invitations.accept_invitation import AcceptInvitation, AcceptInvitationCommand
 from aether.app.invitations.create_invitation import CreateInvitation, CreateInvitationCommand
 from aether.app.invitations.revoke_invitation import RevokeInvitation, RevokeInvitationCommand
+from aether.app.notifications.dispatch_email_outbox import EMAIL_SEND_EVENT_TYPE
 from aether.domain.entities import MembershipRole
 from aether.domain.errors import InvalidInvitationError
 from tests.unit.fakes.auth import FakeClock, FakeIdGenerator
+from tests.unit.fakes.outbox import FakeOutboxRepository
 from tests.unit.fakes.workspaces import (
     FakeAuditLog,
     FakeInvitationRepository,
@@ -28,9 +30,14 @@ INVITEE = UUID(int=2)
 async def test_create_invitation_stores_only_the_hash_never_the_raw_token() -> None:
     invitations = FakeInvitationRepository()
     audit_log = FakeAuditLog()
+    outbox = FakeOutboxRepository()
     clock = FakeClock(start=datetime(2026, 1, 1, tzinfo=UTC))
     use_case = CreateInvitation(
-        invitations=invitations, audit_log=audit_log, clock=clock, ids=FakeIdGenerator()
+        invitations=invitations,
+        audit_log=audit_log,
+        outbox=outbox,
+        clock=clock,
+        ids=FakeIdGenerator(),
     )
 
     result = await use_case.execute(
@@ -46,6 +53,14 @@ async def test_create_invitation_stores_only_the_hash_never_the_raw_token() -> N
     assert result.invitation.token_hash == hash_token(result.raw_token)
     assert result.invitation.expires_at == clock.now() + timedelta(days=7)
     assert audit_log.recorded[0].action == "invitation.created"
+
+    pending = await outbox.fetch_pending(event_type=EMAIL_SEND_EVENT_TYPE, max_attempts=5, limit=10)
+    assert len(pending) == 1
+    assert pending[0].payload["to"] == "invitee@example.com"
+    assert pending[0].tenant_id == WORKSPACE
+    # The raw token must appear only in the queued email payload, never
+    # anywhere the invitation itself (or its audit trail) is readable.
+    assert result.raw_token in pending[0].payload["text_body"]
 
 
 async def test_accept_invitation_creates_membership_and_consumes_token() -> None:

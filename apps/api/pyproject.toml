@@ -19,6 +19,7 @@ dependencies = [
   "uuid-utils>=0.9,<1",
   "alembic>=1.13,<2",
   "greenlet>=3.0,<4",  # required by SQLAlchemy's async engine (Alembic's migration runner, migrations/env.py)
+  "httpx>=0.27,<1",  # Resend adapter's HTTP client (ADR-11.1) — already a dev dep for TestClient
 ]
 
 [dependency-groups]

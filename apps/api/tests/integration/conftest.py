@@ -15,8 +15,11 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import asyncpg
+import httpx
 import pytest
 import redis.asyncio as redis_asyncio
+from testcontainers.core.container import DockerContainer
+from testcontainers.core.waiting_utils import wait_for_logs
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
@@ -29,6 +32,10 @@ PG_IMAGE = (
 )
 REDIS_IMAGE = (
     "redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2"
+)
+# Same digest as infra/compose/compose.yml's mailpit service.
+MAILPIT_IMAGE = (
+    "axllent/mailpit:v1.20@sha256:7eef0f38dbc85e4e264f2edf5d70fbb694826791e05cb2cae4fc9e3282f968f5"
 )
 
 
@@ -81,10 +88,30 @@ async def db_bootstrap_pool(postgres_url: str) -> AsyncIterator[asyncpg.Pool]:
             # TRUNCATE on a partitioned table (audit_events) cascades to
             # all its partitions automatically — no need to list them.
             await conn.execute(
-                "TRUNCATE memberships, invitations, audit_events, workspaces, users, "
-                "refresh_tokens RESTART IDENTITY CASCADE"
+                "TRUNCATE memberships, invitations, audit_events, outbox, "
+                "password_reset_tokens, workspaces, users, refresh_tokens RESTART IDENTITY CASCADE"
             )
         await pool.close()
+
+
+@pytest.fixture(scope="session")
+def mailpit() -> Iterator[tuple[str, int, str]]:
+    """Real mailpit — SMTP intake + HTTP API to assert on received mail.
+    Yields (smtp_host, smtp_port, http_base_url)."""
+    with DockerContainer(MAILPIT_IMAGE).with_exposed_ports(1025, 8025) as container:
+        wait_for_logs(container, "accessible via", timeout=15)
+        host = container.get_container_host_ip()
+        smtp_port = int(container.get_exposed_port(1025))
+        http_port = int(container.get_exposed_port(8025))
+        yield host, smtp_port, f"http://{host}:{http_port}"
+
+
+@pytest.fixture()
+def mailpit_client(mailpit: tuple[str, int, str]) -> Iterator[httpx.Client]:
+    _, _, base_url = mailpit
+    with httpx.Client(base_url=base_url, timeout=5.0) as client:
+        client.delete("/api/v1/messages")  # start each test with an empty mailbox
+        yield client
 
 
 @pytest.fixture()

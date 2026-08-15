@@ -20,6 +20,7 @@ from aether.adapters.jwt.eddsa import EdDSATokenSigner
 from aether.adapters.postgres.audit_log import PostgresAuditLog
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
 from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
+from aether.adapters.postgres.outbox_repository import PostgresOutboxRepository
 from aether.adapters.postgres.pool import create_pool
 from aether.adapters.postgres.refresh_token_repository import PostgresRefreshTokenRepository
 from aether.adapters.postgres.user_repository import PostgresUserRepository
@@ -40,6 +41,7 @@ from aether.app.workspaces.manage_members import ListMembers, RemoveMember, Upda
 from aether.app.workspaces.update_workspace import UpdateWorkspace
 from aether.config import Settings
 from aether.ports.audit import AuditLogPort
+from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.repositories import (
     InvitationRepositoryPort,
     Membership,
@@ -105,6 +107,7 @@ class WorkspaceScope:
     memberships: MembershipRepositoryPort
     invitations: InvitationRepositoryPort
     audit_log: AuditLogPort
+    outbox: OutboxRepositoryPort
 
     get_workspace: GetWorkspace
     update_workspace: UpdateWorkspace
@@ -127,6 +130,7 @@ def build_workspace_scope(
     memberships = PostgresMembershipRepository(conn)
     invitations = PostgresInvitationRepository(conn)
     audit_log = PostgresAuditLog(conn)
+    outbox = PostgresOutboxRepository(conn)
     return WorkspaceScope(
         conn=conn,
         caller_membership=caller_membership,
@@ -134,6 +138,7 @@ def build_workspace_scope(
         memberships=memberships,
         invitations=invitations,
         audit_log=audit_log,
+        outbox=outbox,
         get_workspace=GetWorkspace(workspaces=workspaces),
         update_workspace=UpdateWorkspace(workspaces=workspaces, audit_log=audit_log, ids=ids),
         delete_workspace=DeleteWorkspace(
@@ -143,7 +148,7 @@ def build_workspace_scope(
         update_member_role=UpdateMemberRole(memberships=memberships, audit_log=audit_log, ids=ids),
         remove_member=RemoveMember(memberships=memberships, audit_log=audit_log, ids=ids),
         create_invitation=CreateInvitation(
-            invitations=invitations, audit_log=audit_log, clock=clock, ids=ids
+            invitations=invitations, audit_log=audit_log, outbox=outbox, clock=clock, ids=ids
         ),
         revoke_invitation=RevokeInvitation(invitations=invitations, audit_log=audit_log, ids=ids),
     )
