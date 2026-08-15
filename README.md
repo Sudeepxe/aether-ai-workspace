@@ -8,19 +8,21 @@ refusal. Built end-to-end by one engineer as an architecture-first flagship:
 the AI features are one subsystem inside a real production application
 (auth, tenancy, budgets, audit, observability, DR) — not the whole app.
 
-> **Status: Sprint 0 — repository scaffold.** The factory (quality gates,
-> CI, Docker, docs machinery) exists and is verified; product code lands
-> sprint by sprint. This README is honest about that: no fake badges, no
-> aspirational numbers.
+> **Status: Sprint 2 — Tenancy & Email complete.** Sprint 0 (factory: quality
+> gates, CI, Docker, docs) and Sprint 1 (identity & forced row-level-security
+> tenant isolation) are merged to `main`. Sprint 2 adds workspace/membership/
+> invitation CRUD, RBAC, audit logging, a transactional-outbox-backed email
+> subsystem, password reset, an RFC 9457 Problem+JSON error envelope, and
+> Redis-backed rate limiting with a fail-bounded-open degraded mode. This
+> README is honest about state: no fake badges, no aspirational numbers.
 >
-> **Badge honesty note:** the badge above tracks `main`. Sprint 0's CI
-> remediation (all 5 active lanes green — lint, unit, security, build,
-> docs) is verified on [PR #6](https://github.com/Sudeepxe/aether-ai-workspace/pull/6)
-> and hasn't been merged yet — branch protection can't be enabled on this
-> private repo under the current GitHub plan (tracked in
-> [issue #3](https://github.com/Sudeepxe/aether-ai-workspace/issues/3)), so
-> merging is a deliberate, separate decision rather than an automated gate.
-> The badge will reflect green once that merge happens.
+> **Branch protection note:** required status checks on `main` are enforced
+> manually (every merge verifies all CI jobs green before squashing) rather
+> than by GitHub's branch-protection API, which this private repo's plan
+> tier doesn't support (`403 Upgrade to GitHub Pro...`) — tracked as an open
+> owner decision in [issue #3](https://github.com/Sudeepxe/aether-ai-workspace/issues/3)
+> (make the repo public, or upgrade the plan). The badge above tracks `main`
+> and reflects the same CI lanes run on every PR.
 
 ## Architecture
 
@@ -37,8 +39,10 @@ resume; a thin owned **LLM router** with fallback chains; and a CI-gated
 
 | Artifact | Status |
 |---|---|
-| CI pipeline | live (S0) — full shape, future lanes disabled-and-dated; verified green pre-merge (see badge note above) |
-| Coverage gate | S1 |
+| CI pipeline | live (S0) — full shape, future lanes disabled-and-dated; verified green pre-merge (see branch protection note above) |
+| Coverage gate | live (S1) — 80% minimum, enforced independently on unit+architecture and on integration+security |
+| Auth & tenant isolation | live (S1) — EdDSA-JWT + rotating refresh tokens, forced RLS, three-role DB privilege model |
+| Workspace CRUD, RBAC, audit log, email, rate limiting | live (S2) |
 | **Eval score (faithfulness / refusal)** | measured from S7 — placeholder until then, never faked |
 | One-command demo | infra: `make dev` today · full demo profile: S9–S11 |
 
