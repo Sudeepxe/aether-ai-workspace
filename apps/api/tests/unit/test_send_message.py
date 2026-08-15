@@ -6,22 +6,30 @@ import pytest
 
 from aether.app.chat.send_message import SendMessage, SendMessageCommand
 from aether.domain.entities import MessageRole, MessageStatus
+from aether.domain.errors import BudgetExhaustedError
 from aether.domain.streaming import (
     DoneStreamEvent,
+    ErrorStreamEvent,
     GenerationStatus,
     MetaStreamEvent,
     TokenStreamEvent,
     UsageStreamEvent,
 )
+from aether.ports.llm import ProviderError
 from tests.unit.fakes.auth import FakeIdGenerator
 from tests.unit.fakes.chat import (
+    FakeBudgetAdmission,
     FakeCancellation,
     FakeGenerator,
     FakeMessageStore,
     FakeStreamBuffer,
+    FakeUsageLedger,
 )
 
 pytestmark = pytest.mark.unit
+
+_MAX_TOKENS = 1024
+_CEILING_COST_PER_1K_MICROCENTS = 60_000
 
 
 def _orchestrator(
@@ -29,22 +37,31 @@ def _orchestrator(
     deltas: list[str],
     messages: FakeMessageStore | None = None,
     cancellation: FakeCancellation | None = None,
-) -> tuple[SendMessage, FakeMessageStore, FakeStreamBuffer, FakeCancellation]:
+    generator: FakeGenerator | None = None,
+    admission: FakeBudgetAdmission | None = None,
+    usage_ledger: FakeUsageLedger | None = None,
+) -> tuple[SendMessage, FakeMessageStore, FakeStreamBuffer, FakeCancellation, FakeUsageLedger]:
     messages = messages or FakeMessageStore()
     buffer = FakeStreamBuffer()
     cancellation = cancellation or FakeCancellation()
+    admission = admission or FakeBudgetAdmission()
+    usage_ledger = usage_ledger or FakeUsageLedger()
     orchestrator = SendMessage(
         messages=messages,
-        generator=FakeGenerator(deltas=deltas),
+        generator=generator or FakeGenerator(deltas=deltas),
         buffer=buffer,
         cancellation=cancellation,
+        admission=admission,
+        usage_ledger=usage_ledger,
         ids=FakeIdGenerator(),
+        max_tokens=_MAX_TOKENS,
+        ceiling_cost_per_1k_microcents=_CEILING_COST_PER_1K_MICROCENTS,
     )
-    return orchestrator, messages, buffer, cancellation
+    return orchestrator, messages, buffer, cancellation, usage_ledger
 
 
 async def test_full_turn_persists_user_and_assistant_messages_and_follows_the_grammar() -> None:
-    orchestrator, messages, buffer, _ = _orchestrator(deltas=["Hello", ", ", "world"])
+    orchestrator, messages, buffer, _, usage_ledger = _orchestrator(deltas=["Hello", ", ", "world"])
     workspace_id, thread_id = uuid4(), uuid4()
 
     events = [
@@ -80,14 +97,26 @@ async def test_full_turn_persists_user_and_assistant_messages_and_follows_the_gr
     assert assistant_msg.content == "Hello, world"
     assert assistant_msg.status == MessageStatus.COMPLETE
     assert assistant_msg.seq == user_msg.seq + 1
+    # Real usage from the generator's final GenerationUsage, not a
+    # word-count estimate — the orchestrator no longer computes this itself.
+    assert assistant_msg.model == "fake-model"
+    assert assistant_msg.cost_microcents == 100
+    usage_event = events[4]
+    assert isinstance(usage_event, UsageStreamEvent)
+    assert usage_event.cost_microcents == 100
 
     # Every event was also buffered — the resume/replay path's data source.
     buffered = buffer.events[(workspace_id, events[0].generation_id)]
     assert len(buffered) == len(events)
 
+    # Positive real cost settles into the usage ledger, same request.
+    assert len(usage_ledger.recorded) == 1
+    assert usage_ledger.recorded[0].cost_microcents == 100
+    assert usage_ledger.recorded[0].model == "fake-model"
+
 
 async def test_retried_post_with_same_client_message_id_replays_without_regenerating() -> None:
-    orchestrator, messages, _, _ = _orchestrator(deltas=["first", " ", "reply"])
+    orchestrator, messages, _, _, _ = _orchestrator(deltas=["first", " ", "reply"])
     workspace_id, thread_id = uuid4(), uuid4()
     command = SendMessageCommand(
         workspace_id=workspace_id, thread_id=thread_id, content="hi", client_message_id="cmid-dup"
@@ -114,7 +143,9 @@ async def test_retried_post_with_same_client_message_id_replays_without_regenera
 
 async def test_cancellation_before_any_token_persists_no_assistant_message() -> None:
     cancellation = FakeCancellation()
-    orchestrator, messages, _, _ = _orchestrator(deltas=["a", "b", "c"], cancellation=cancellation)
+    orchestrator, messages, _, _, _ = _orchestrator(
+        deltas=["a", "b", "c"], cancellation=cancellation
+    )
     workspace_id, thread_id = uuid4(), uuid4()
 
     # Mark cancelled before the orchestrator even starts iterating the
@@ -136,7 +167,7 @@ async def test_cancellation_before_any_token_persists_no_assistant_message() -> 
 
 async def test_cancellation_mid_stream_persists_partial_content_as_cancelled() -> None:
     cancellation = FakeCancellation()
-    orchestrator, messages, _, _ = _orchestrator(
+    orchestrator, messages, _, _, _ = _orchestrator(
         deltas=["one", "two", "three", "four"], cancellation=cancellation
     )
     workspace_id, thread_id = uuid4(), uuid4()
@@ -158,3 +189,109 @@ async def test_cancellation_mid_stream_persists_partial_content_as_cancelled() -
     assistant_msg = next(m for m in messages._rows.values() if m.role == MessageRole.ASSISTANT)
     assert assistant_msg.content == "one"
     assert assistant_msg.status == MessageStatus.CANCELLED
+
+
+async def test_workspace_budget_exhausted_refuses_before_persisting_or_generating() -> None:
+    admission = FakeBudgetAdmission(allow_workspace=False)
+    orchestrator, messages, buffer, _, usage_ledger = _orchestrator(
+        deltas=["should", "never", "run"], admission=admission
+    )
+    workspace_id, thread_id = uuid4(), uuid4()
+
+    with pytest.raises(BudgetExhaustedError):
+        async for _ in orchestrator.execute(
+            SendMessageCommand(
+                workspace_id=workspace_id,
+                thread_id=thread_id,
+                content="hi",
+                client_message_id="cmid-budget-1",
+            )
+        ):
+            pass
+
+    assert messages._rows == {}
+    assert usage_ledger.recorded == []
+    assert buffer.events == {}
+    assert admission.checked_workspaces == [workspace_id]
+
+
+async def test_global_budget_exhausted_refuses_before_workspace_check() -> None:
+    admission = FakeBudgetAdmission(allow_global=False)
+    orchestrator, messages, _, _, _ = _orchestrator(deltas=["a"], admission=admission)
+    workspace_id, thread_id = uuid4(), uuid4()
+
+    with pytest.raises(BudgetExhaustedError):
+        async for _ in orchestrator.execute(
+            SendMessageCommand(
+                workspace_id=workspace_id,
+                thread_id=thread_id,
+                content="hi",
+                client_message_id="cmid-budget-2",
+            )
+        ):
+            pass
+
+    assert messages._rows == {}
+    # The cheaper, workspace-independent check runs first — no point
+    # reading one workspace's budget row when the whole system is capped.
+    assert admission.checked_workspaces == []
+
+
+async def test_provider_error_before_any_token_persists_nothing_and_emits_error_event() -> None:
+    generator = FakeGenerator(deltas=["never", "sent"], error=ProviderError("down", retryable=True))
+    orchestrator, messages, _, _, usage_ledger = _orchestrator(deltas=[], generator=generator)
+    workspace_id, thread_id = uuid4(), uuid4()
+
+    events = [
+        e
+        async for e in orchestrator.execute(
+            SendMessageCommand(
+                workspace_id=workspace_id,
+                thread_id=thread_id,
+                content="hi",
+                client_message_id="cmid-err-1",
+            )
+        )
+    ]
+
+    error_events = [e for e in events if isinstance(e, ErrorStreamEvent)]
+    assert len(error_events) == 1
+    assert error_events[0].code == "provider_error"
+    last = events[-1]
+    assert isinstance(last, DoneStreamEvent)
+    assert last.status == GenerationStatus.ERROR
+    assert not any(m.role == MessageRole.ASSISTANT for m in messages._rows.values())
+    assert usage_ledger.recorded == []
+
+
+async def test_provider_error_mid_stream_persists_partial_content() -> None:
+    generator = FakeGenerator(
+        deltas=["one", "two", "three"],
+        error=ProviderError("connection reset", retryable=True),
+        fail_after=2,
+    )
+    orchestrator, messages, _, _, usage_ledger = _orchestrator(deltas=[], generator=generator)
+    workspace_id, thread_id = uuid4(), uuid4()
+
+    events = [
+        e
+        async for e in orchestrator.execute(
+            SendMessageCommand(
+                workspace_id=workspace_id,
+                thread_id=thread_id,
+                content="hi",
+                client_message_id="cmid-err-2",
+            )
+        )
+    ]
+
+    error_events = [e for e in events if isinstance(e, ErrorStreamEvent)]
+    assert len(error_events) == 1
+    last = events[-1]
+    assert isinstance(last, DoneStreamEvent)
+    assert last.status == GenerationStatus.PARTIAL
+    assistant_msg = next(m for m in messages._rows.values() if m.role == MessageRole.ASSISTANT)
+    assert assistant_msg.content == "onetwo"
+    assert assistant_msg.status == MessageStatus.PARTIAL
+    # No authoritative GenerationUsage ever arrived — nothing to settle.
+    assert usage_ledger.recorded == []

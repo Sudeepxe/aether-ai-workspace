@@ -97,6 +97,9 @@ _EXPECTED_ROUTE_AUTH: dict[tuple[str, str], AuthRequirement] = {
         "/v1/workspaces/{workspace_id}/generations/{generation_id}",
         "GET",
     ): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/usage", "GET"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/budget", "GET"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/budget", "PUT"): AuthRequirement.WORKSPACE_MEMBER,
 }
 
 

@@ -14,20 +14,33 @@ from aether.domain.errors import WorkspaceConcurrencyConflictError, WorkspaceNot
 from tests.unit.fakes.auth import FakeClock, FakeIdGenerator
 from tests.unit.fakes.workspaces import (
     FakeAuditLog,
+    FakeBudgetRepository,
     FakeMembershipRepository,
     FakeWorkspaceRepository,
 )
 
 pytestmark = pytest.mark.unit
 
+_DEFAULT_MONTHLY_BUDGET_MICROCENTS = 500_000_000
+_DEFAULT_BUDGET_SOFT_PCT = 80
+
 
 async def test_create_workspace_makes_creator_the_sole_owner() -> None:
     workspaces = FakeWorkspaceRepository()
     memberships = FakeMembershipRepository()
+    budgets = FakeBudgetRepository()
     audit_log = FakeAuditLog()
     ids = FakeIdGenerator()
+    clock = FakeClock(start=datetime.now(UTC))
     use_case = CreateWorkspace(
-        workspaces=workspaces, memberships=memberships, audit_log=audit_log, ids=ids
+        workspaces=workspaces,
+        memberships=memberships,
+        budgets=budgets,
+        audit_log=audit_log,
+        clock=clock,
+        ids=ids,
+        default_monthly_budget_microcents=_DEFAULT_MONTHLY_BUDGET_MICROCENTS,
+        default_budget_soft_pct=_DEFAULT_BUDGET_SOFT_PCT,
     )
     owner_id = UUID(int=999)
     workspace_id = UUID(int=1)
@@ -42,6 +55,14 @@ async def test_create_workspace_makes_creator_the_sole_owner() -> None:
     assert membership is not None
     assert membership.role == MembershipRole.OWNER
     assert audit_log.recorded[0].action == "workspace.created"
+
+    # Provisioned so the budget admission check's fail-closed default
+    # doesn't block this workspace's very first chat message (§3.2.14).
+    budget = await budgets.get(workspace_id)
+    assert budget is not None
+    assert budget.monthly_limit_microcents == _DEFAULT_MONTHLY_BUDGET_MICROCENTS
+    assert budget.soft_pct == _DEFAULT_BUDGET_SOFT_PCT
+    assert budget.current_period_start.day == 1
 
 
 async def test_get_workspace_raises_not_found_for_unknown_id() -> None:

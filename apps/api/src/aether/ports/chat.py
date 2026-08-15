@@ -1,32 +1,76 @@
-"""Chat-turn ports: the LLM placeholder interface and the streaming-safe
+"""Chat-turn ports: the LLM Router interface and the streaming-safe
 message store (Blueprint §3.2.3, §4.4).
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
 from aether.domain.entities import Message, MessageRole, MessageStatus
 
-__all__ = ["GeneratorPort", "Message", "MessageRole", "MessageStatus", "MessageStorePort"]
+__all__ = [
+    "GenerationUsage",
+    "GeneratorChunk",
+    "GeneratorPort",
+    "Message",
+    "MessageRole",
+    "MessageStatus",
+    "MessageStorePort",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationUsage:
+    """The final item a generator yields, once available — real,
+    provider-authoritative token counts for the LLM Router (§3.2.14:
+    settlement is "from actual provider usage"); EchoGenerator's own
+    word-count estimate (cost_microcents=0) for the S3 placeholder. Never
+    a mid-stream item — exactly one, always last. Cost is computed here
+    (by whichever generator has the model's pricing, not by the
+    orchestrator) so SendMessage never needs to know about provider
+    capability registries."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    cost_microcents: int
+    model: str
+
+
+# A tagged union rather than a separate return channel: an async
+# generator can't yield *and* return a distinct value, so the usage
+# record is just the final yielded item instead of a special one.
+GeneratorChunk = str | GenerationUsage
 
 
 class GeneratorPort(Protocol):
-    """One internal interface over the completion engine — the LLM
-    Router lands in S4; this sprint's only implementation is
-    ``adapters.echo.generator.EchoGenerator``, a placeholder that proves
-    the streaming spine (persistence, SSE contract, cross-replica
-    resume/cancel) end-to-end before a real provider is wired in
-    (issue #26)."""
+    """One internal interface over the completion engine. S3's only
+    implementation was ``adapters.echo.generator.EchoGenerator``, a
+    placeholder proving the streaming spine end-to-end before a real
+    provider existed; S4 adds ``app.llm.router.LlmRouter`` as the real
+    implementation, composing provider adapters behind circuit breakers
+    and a fallback chain (issue #38)."""
 
-    def generate(self, *, thread_history: list[Message], user_content: str) -> AsyncIterator[str]:
-        """Yields text deltas. Never raises for ordinary content — a real
-        provider adapter's failure modes (breaker-open, timeout) are S4
-        scope; this placeholder's only failure path is cancellation,
-        handled by the orchestrator breaking out of iteration, not by
-        the generator itself."""
+    @property
+    def primary_model(self) -> str:
+        """A best-effort, pre-generation label for the SSE ``meta``
+        event's ``model`` field, which must be emitted before generation
+        starts (§4.4's grammar: meta is always first). Not authoritative
+        — with a fallback chain, the model that actually answers may
+        differ; the persisted message's ``model`` (from the final
+        GenerationUsage) is the authoritative record."""
+        ...
+
+    def generate(
+        self, *, thread_history: list[Message], user_content: str
+    ) -> AsyncIterator[GeneratorChunk]:
+        """Yields text deltas, then exactly one GenerationUsage as the
+        final item. May raise (a real provider's failure modes —
+        breaker-open, timeout, all-providers-down) — the orchestrator is
+        responsible for turning that into a persisted partial message
+        and an error event, not silently swallowing it."""
         ...
 
 

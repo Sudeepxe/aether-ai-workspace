@@ -62,6 +62,29 @@ class Settings(BaseSettings):
     email_sender: str = "noreply@aether.local"
     resend_api_key: str = ""
 
+    # --- LLM Router (Sprint 4, ADR-3.5) ---------------------------------
+    # Empty string is not a usable key — same posture as resend_api_key:
+    # real values come from the SOPS bundle (ADR-7.5), never committed.
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+
+    # --- Usage metering & budgets (Sprint 4, §3.2.14) --------------------
+    # cost_microcents units throughout: 1 microcent = 1e-6 US cent =
+    # 1e-8 USD. $50 = 5_000_000_000 microcents (NFR-C-1's global demo
+    # cap); $5/workspace/month is a conservative per-tenant default under
+    # that, provisioned automatically at workspace creation.
+    global_monthly_budget_microcents: int = 5_000_000_000
+    default_workspace_monthly_budget_microcents: int = 500_000_000
+    default_budget_soft_pct: int = 80
+    # Pre-request ceiling estimate (§3.2.14): local prompt-token count +
+    # max_tokens, priced at a conservative worst-case rate so the
+    # provider-agnostic orchestrator never needs a capability registry of
+    # its own. 60_000 = the more expensive of the two configured
+    # providers' cost_per_1k_completion_microcents (openai/completion.py's
+    # gpt-4o-mini) — update this if a pricier model chain is added.
+    admission_ceiling_cost_per_1k_microcents: int = 60_000
+    router_max_tokens: int = 1024
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

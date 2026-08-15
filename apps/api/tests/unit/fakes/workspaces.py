@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
 from aether.domain.entities import AuditEvent, Invitation, Membership, MembershipRole, Workspace
+from aether.ports.metering import Budget
 
 
 @dataclass
@@ -179,6 +180,54 @@ class FakeMembershipRepository:
 
     async def count_by_role(self, workspace_id: UUID, role: MembershipRole) -> int:
         return sum(1 for (ws, _), m in self._rows.items() if ws == workspace_id and m.role == role)
+
+
+class FakeBudgetRepository:
+    def __init__(self) -> None:
+        self._rows: dict[UUID, Budget] = {}
+
+    async def get(self, workspace_id: UUID) -> Budget | None:
+        return self._rows.get(workspace_id)
+
+    async def create(
+        self,
+        *,
+        workspace_id: UUID,
+        monthly_limit_microcents: int,
+        soft_pct: int,
+        current_period_start: date,
+    ) -> Budget:
+        budget = Budget(
+            workspace_id=workspace_id,
+            monthly_limit_microcents=monthly_limit_microcents,
+            soft_pct=soft_pct,
+            current_period_start=current_period_start,
+            settled_microcents=0,
+            updated_at=datetime.now().astimezone(),
+        )
+        self._rows[workspace_id] = budget
+        return budget
+
+    async def update_limit(
+        self,
+        workspace_id: UUID,
+        *,
+        monthly_limit_microcents: int,
+        expected_updated_at: datetime,
+    ) -> Budget | None:
+        current = self._rows.get(workspace_id)
+        if current is None or current.updated_at != expected_updated_at:
+            return None
+        updated = Budget(
+            workspace_id=current.workspace_id,
+            monthly_limit_microcents=monthly_limit_microcents,
+            soft_pct=current.soft_pct,
+            current_period_start=current.current_period_start,
+            settled_microcents=current.settled_microcents,
+            updated_at=datetime.now().astimezone(),
+        )
+        self._rows[workspace_id] = updated
+        return updated
 
 
 class FakeInvitationRepository:

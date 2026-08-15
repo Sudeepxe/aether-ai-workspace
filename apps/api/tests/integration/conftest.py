@@ -91,6 +91,12 @@ async def db_bootstrap_pool(postgres_url: str) -> AsyncIterator[asyncpg.Pool]:
                 "TRUNCATE memberships, invitations, audit_events, outbox, "
                 "password_reset_tokens, workspaces, users, refresh_tokens RESTART IDENTITY CASCADE"
             )
+            # global_usage_counter has no FK relationship to workspaces
+            # (deliberately — it's not tenant data, see its migration),
+            # so TRUNCATE ... CASCADE above never reaches it; reset its
+            # one row directly instead of truncating (a CHECK(id)
+            # singleton table must never end up with zero rows).
+            await conn.execute("UPDATE global_usage_counter SET settled_microcents = 0")
         await pool.close()
 
 
