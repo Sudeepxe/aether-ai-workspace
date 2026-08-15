@@ -15,35 +15,50 @@ import redis.asyncio as redis_asyncio
 
 from aether.adapters.argon2.hasher import Argon2PasswordHasher
 from aether.adapters.clock import SystemClock
+from aether.adapters.echo.generator import EchoGenerator
 from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.jwt.eddsa import EdDSATokenSigner
 from aether.adapters.postgres.audit_log import PostgresAuditLog
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
 from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
+from aether.adapters.postgres.message_repository import PostgresMessageRepository
+from aether.adapters.postgres.message_store import PostgresMessageStore
 from aether.adapters.postgres.outbox_repository import PostgresOutboxRepository
 from aether.adapters.postgres.password_reset_token_repository import (
     PostgresPasswordResetTokenRepository,
 )
 from aether.adapters.postgres.pool import create_pool
 from aether.adapters.postgres.refresh_token_repository import PostgresRefreshTokenRepository
+from aether.adapters.postgres.thread_repository import PostgresThreadRepository
 from aether.adapters.postgres.user_repository import PostgresUserRepository
 from aether.adapters.postgres.workspace_repository import PostgresWorkspaceRepository
+from aether.adapters.redis.cancellation import RedisCancellationChannel
 from aether.adapters.redis.denylist import RedisJtiDenylist
 from aether.adapters.redis.rate_limiter import (
     FailOpenRateLimiter,
     LocalTokenBucketRateLimiter,
     RedisTokenBucketRateLimiter,
 )
+from aether.adapters.redis.stream_buffer import RedisStreamBuffer
 from aether.app.auth.login_user import LoginUser
 from aether.app.auth.logout_user import LogoutUser
 from aether.app.auth.refresh_session import RefreshSession
 from aether.app.auth.register_user import RegisterUser
 from aether.app.auth.revoke_user_sessions import RevokeUserSessions
+from aether.app.chat.cancel_generation import CancelGeneration
+from aether.app.chat.get_generation_status import GetGenerationStatus
+from aether.app.chat.send_message import SendMessage
 from aether.app.invitations.accept_invitation import AcceptInvitation
 from aether.app.invitations.create_invitation import CreateInvitation
 from aether.app.invitations.revoke_invitation import RevokeInvitation
 from aether.app.password_reset.request_password_reset import RequestPasswordReset
 from aether.app.password_reset.reset_password import ResetPassword
+from aether.app.threads.create_thread import CreateThread
+from aether.app.threads.delete_thread import DeleteThread
+from aether.app.threads.get_thread import GetThread
+from aether.app.threads.list_messages import ListMessages
+from aether.app.threads.list_threads import ListThreads
+from aether.app.threads.update_thread import UpdateThread
 from aether.app.workspaces.create_workspace import CreateWorkspace
 from aether.app.workspaces.delete_workspace import DeleteWorkspace
 from aether.app.workspaces.get_workspace import GetWorkspace
@@ -51,19 +66,23 @@ from aether.app.workspaces.manage_members import ListMembers, RemoveMember, Upda
 from aether.app.workspaces.update_workspace import UpdateWorkspace
 from aether.config import Settings
 from aether.ports.audit import AuditLogPort
+from aether.ports.chat import GeneratorPort, MessageStorePort
 from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.rate_limit import RateLimitPort
 from aether.ports.repositories import (
     InvitationRepositoryPort,
     Membership,
     MembershipRepositoryPort,
+    MessageRepositoryPort,
     PasswordResetTokenRepositoryPort,
     RefreshTokenRepositoryPort,
+    ThreadRepositoryPort,
     UserRepositoryPort,
     WorkspaceRepositoryPort,
 )
 from aether.ports.revocation import RevocationPort
 from aether.ports.security import ClockPort, IdPort, PasswordHasherPort, TokenPort
+from aether.ports.streaming import CancellationPort, StreamBufferPort
 
 
 @dataclass
@@ -91,6 +110,14 @@ class Container:
     without per-request tenant scoping."""
     outbox: OutboxRepositoryPort
     rate_limiter: RateLimitPort
+    message_store: MessageStorePort
+    """Pool-bound, short-transaction-per-call — see ports.chat.MessageStorePort's
+    docstring for why chat persistence can't use the WorkspaceScope.conn
+    pattern (a streaming request's lifetime would hold a connection open
+    for the whole generation)."""
+    generator: GeneratorPort
+    stream_buffer: StreamBufferPort
+    cancellation: CancellationPort
 
     register_user: RegisterUser
     login_user: LoginUser
@@ -99,6 +126,9 @@ class Container:
     revoke_user_sessions: RevokeUserSessions
     request_password_reset: RequestPasswordReset
     reset_password: ResetPassword
+    send_message: SendMessage
+    cancel_generation: CancelGeneration
+    get_generation_status: GetGenerationStatus
 
     refresh_ttl_seconds: int
 
@@ -123,6 +153,8 @@ class WorkspaceScope:
     workspaces: WorkspaceRepositoryPort
     memberships: MembershipRepositoryPort
     invitations: InvitationRepositoryPort
+    threads: ThreadRepositoryPort
+    messages: MessageRepositoryPort
     audit_log: AuditLogPort
     outbox: OutboxRepositoryPort
 
@@ -134,6 +166,12 @@ class WorkspaceScope:
     remove_member: RemoveMember
     create_invitation: CreateInvitation
     revoke_invitation: RevokeInvitation
+    create_thread: CreateThread
+    get_thread: GetThread
+    list_threads: ListThreads
+    update_thread: UpdateThread
+    delete_thread: DeleteThread
+    list_messages: ListMessages
 
 
 def build_workspace_scope(
@@ -146,6 +184,8 @@ def build_workspace_scope(
     workspaces = PostgresWorkspaceRepository(conn)
     memberships = PostgresMembershipRepository(conn)
     invitations = PostgresInvitationRepository(conn)
+    threads = PostgresThreadRepository(conn)
+    messages = PostgresMessageRepository(conn)
     audit_log = PostgresAuditLog(conn)
     outbox = PostgresOutboxRepository(conn)
     return WorkspaceScope(
@@ -154,6 +194,8 @@ def build_workspace_scope(
         workspaces=workspaces,
         memberships=memberships,
         invitations=invitations,
+        threads=threads,
+        messages=messages,
         audit_log=audit_log,
         outbox=outbox,
         get_workspace=GetWorkspace(workspaces=workspaces),
@@ -168,6 +210,12 @@ def build_workspace_scope(
             invitations=invitations, audit_log=audit_log, outbox=outbox, clock=clock, ids=ids
         ),
         revoke_invitation=RevokeInvitation(invitations=invitations, audit_log=audit_log, ids=ids),
+        create_thread=CreateThread(threads=threads, ids=ids),
+        get_thread=GetThread(threads=threads),
+        list_threads=ListThreads(threads=threads),
+        update_thread=UpdateThread(threads=threads),
+        delete_thread=DeleteThread(threads=threads, clock=clock),
+        list_messages=ListMessages(messages=messages),
     )
 
 
@@ -190,6 +238,18 @@ async def resolve_workspace_scope(
     if caller_membership is None:
         return None
     return build_workspace_scope(conn, caller_membership, clock=clock, ids=ids)
+
+
+async def resolve_caller_membership(
+    conn: asyncpg.Connection, workspace_id: UUID, user_id: UUID
+) -> Membership | None:
+    """A brief, standalone membership lookup — used by chat routes
+    instead of ``resolve_workspace_scope``/``build_workspace_scope``,
+    because those build a full scope bound to one connection meant to be
+    held for the request's lifetime, which chat routes must never do
+    (see ports.chat.MessageStorePort's docstring). The caller acquires
+    and releases its own short-lived connection around this call."""
+    return await PostgresMembershipRepository(conn).get(workspace_id, user_id)
 
 
 def build_create_workspace_use_case(conn: asyncpg.Connection, *, ids: IdPort) -> CreateWorkspace:
@@ -245,6 +305,11 @@ async def build_container(settings: Settings) -> Container:
 
     revoke_user_sessions = RevokeUserSessions(refresh_tokens=refresh_tokens, clock=clock)
 
+    message_store = PostgresMessageStore(db_pool)
+    generator = EchoGenerator()
+    stream_buffer = RedisStreamBuffer(redis_client)
+    cancellation = RedisCancellationChannel(redis_client)
+
     return Container(
         db_pool=db_pool,
         redis_client=redis_client,
@@ -260,6 +325,10 @@ async def build_container(settings: Settings) -> Container:
         rate_limiter=rate_limiter,
         audit_log=audit_log,
         outbox=outbox,
+        message_store=message_store,
+        generator=generator,
+        stream_buffer=stream_buffer,
+        cancellation=cancellation,
         register_user=RegisterUser(users=users, hasher=hasher, audit_log=audit_log, ids=ids),
         login_user=LoginUser(
             users=users,
@@ -303,5 +372,14 @@ async def build_container(settings: Settings) -> Container:
             clock=clock,
             ids=ids,
         ),
+        send_message=SendMessage(
+            messages=message_store,
+            generator=generator,
+            buffer=stream_buffer,
+            cancellation=cancellation,
+            ids=ids,
+        ),
+        cancel_generation=CancelGeneration(cancellation=cancellation),
+        get_generation_status=GetGenerationStatus(buffer=stream_buffer),
         refresh_ttl_seconds=settings.jwt_refresh_ttl_seconds,
     )

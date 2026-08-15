@@ -18,6 +18,10 @@ build/
 node_modules/
 apps/web/dist/
 .vite/
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/
+apps/web/coverage/
 
 # ---- Environment & secrets -------------------------------------------------
 # Only the example contract is committed (see SPRINT_0_PLAN §15).

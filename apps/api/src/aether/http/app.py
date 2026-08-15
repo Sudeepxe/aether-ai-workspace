@@ -23,6 +23,7 @@ from aether.domain.errors import (
     AuthenticationFailedError,
     DomainError,
     EmailAlreadyRegisteredError,
+    GenerationNotFoundError,
     InvalidAccessTokenError,
     InvalidInvitationError,
     InvalidPasswordResetTokenError,
@@ -30,6 +31,7 @@ from aether.domain.errors import (
     LastOwnerProtectionError,
     MembershipNotFoundError,
     RefreshTokenReusedError,
+    ThreadNotFoundError,
     UserNotFoundError,
     WorkspaceConcurrencyConflictError,
     WorkspaceNotFoundError,
@@ -38,8 +40,11 @@ from aether.http.authz import assert_all_routes_declare_auth
 from aether.http.composition import build_container
 from aether.http.problem_json import install_error_handlers
 from aether.http.routes.auth import router as auth_router
+from aether.http.routes.generations import router as generations_router
 from aether.http.routes.invitations import router as invitations_router
 from aether.http.routes.me import router as me_router
+from aether.http.routes.messages import router as messages_router
+from aether.http.routes.threads import router as threads_router
 from aether.http.routes.workspaces import router as workspaces_router
 from aether.logging import configure_logging, get_logger
 
@@ -63,6 +68,8 @@ _ERROR_STATUS: dict[type[DomainError], int] = {
     # already used for AuthenticationFailedError.
     InvalidInvitationError: 404,
     InvalidPasswordResetTokenError: 404,
+    ThreadNotFoundError: 404,
+    GenerationNotFoundError: 404,
 }
 
 
@@ -155,6 +162,9 @@ def create_app() -> FastAPI:
     app.include_router(me_router)
     app.include_router(workspaces_router)
     app.include_router(invitations_router)
+    app.include_router(threads_router)
+    app.include_router(messages_router)
+    app.include_router(generations_router)
 
     install_error_handlers(app, error_status=_ERROR_STATUS)
 

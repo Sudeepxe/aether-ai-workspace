@@ -21,8 +21,12 @@ from aether.domain.entities import (
     Invitation,
     Membership,
     MembershipRole,
+    Message,
+    MessageRole,
+    MessageStatus,
     PasswordResetToken,
     RefreshToken,
+    Thread,
     User,
     Workspace,
 )
@@ -36,10 +40,16 @@ __all__ = [
     "Membership",
     "MembershipRepositoryPort",
     "MembershipRole",
+    "Message",
+    "MessageRepositoryPort",
+    "MessageRole",
+    "MessageStatus",
     "PasswordResetToken",
     "PasswordResetTokenRepositoryPort",
     "RefreshToken",
     "RefreshTokenRepositoryPort",
+    "Thread",
+    "ThreadRepositoryPort",
     "User",
     "UserRepositoryPort",
     "Workspace",
@@ -161,3 +171,63 @@ class PasswordResetTokenRepositoryPort(Protocol):
     async def get_by_token_hash(self, token_hash: str) -> PasswordResetToken | None: ...
 
     async def consume(self, token_id: UUID, *, consumed_at: datetime) -> None: ...
+
+
+class ThreadRepositoryPort(Protocol):
+    async def create(
+        self, *, id: UUID, workspace_id: UUID, created_by: UUID, title: str | None
+    ) -> Thread: ...
+
+    async def get(self, workspace_id: UUID, thread_id: UUID) -> Thread | None: ...
+
+    async def list_by_workspace(
+        self, workspace_id: UUID, *, after: tuple[datetime, UUID] | None, limit: int
+    ) -> list[Thread]:
+        """Cursor pagination on (created_at DESC, id) per ADR-4.4, newest
+        first; ``after`` is the (created_at, id) of the last item on the
+        previous page, or None for the first page."""
+        ...
+
+    async def update_title(
+        self, workspace_id: UUID, thread_id: UUID, *, title: str | None
+    ) -> Thread | None: ...
+
+    async def soft_delete(
+        self, workspace_id: UUID, thread_id: UUID, *, deleted_at: datetime
+    ) -> None: ...
+
+
+class MessageRepositoryPort(Protocol):
+    async def create(
+        self,
+        *,
+        id: UUID,
+        workspace_id: UUID,
+        thread_id: UUID,
+        role: MessageRole,
+        content: str,
+        status: MessageStatus,
+        client_message_id: str | None,
+        model: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        cost_microcents: int | None = None,
+        grounded: bool = False,
+    ) -> Message:
+        """Assigns ``seq`` transactionally via the locked per-thread
+        counter row (ADR-8.2) — the caller never supplies it."""
+        ...
+
+    async def get_by_client_message_id(
+        self, workspace_id: UUID, thread_id: UUID, client_message_id: str
+    ) -> Message | None:
+        """Idempotency lookup (ADR-4.6): a retried POST with the same
+        client-generated ``message_id`` must not create a second message."""
+        ...
+
+    async def list_by_thread(
+        self, workspace_id: UUID, thread_id: UUID, *, after_seq: int | None, limit: int
+    ) -> list[Message]:
+        """Cursor pagination on seq DESC (§8.1: seq is itself a natural,
+        gapless pagination cursor — ADR-8.2)."""
+        ...
