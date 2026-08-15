@@ -15,12 +15,14 @@ from fastapi import Depends, Header, Request
 from aether.app.auth.tokens import hash_token
 from aether.app.invitations.accept_invitation import AcceptInvitation
 from aether.app.workspaces.create_workspace import CreateWorkspace
+from aether.domain.entities import Membership
 from aether.domain.errors import InvalidAccessTokenError, WorkspaceNotFoundError
 from aether.http.composition import (
     Container,
     WorkspaceScope,
     build_accept_invitation_use_case,
     build_create_workspace_use_case,
+    resolve_caller_membership,
     resolve_workspace_scope,
 )
 
@@ -97,6 +99,25 @@ async def get_new_workspace_connection(
     async with container.db_pool.acquire() as conn, conn.transaction():
         await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
         yield workspace_id, build_create_workspace_use_case(conn, ids=container.ids)
+
+
+async def get_chat_authorization(
+    workspace_id: UUID,
+    session: AuthenticatedSession = Depends(get_current_session),
+    container: Container = Depends(get_container),
+) -> Membership:
+    """Unlike ``get_workspace_scope``, this briefly acquires a connection
+    to resolve the caller's membership and releases it immediately —
+    chat routes must never hold a connection open for a token stream's
+    duration (see ports.chat.MessageStorePort's docstring). Persistence
+    for the actual chat turn goes through ``container.message_store``
+    instead, which manages its own short-lived connections per call."""
+    async with container.db_pool.acquire() as conn, conn.transaction():
+        await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
+        membership = await resolve_caller_membership(conn, workspace_id, session.user_id)
+    if membership is None:
+        raise WorkspaceNotFoundError(str(workspace_id))
+    return membership
 
 
 async def get_invitation_acceptance_scope(

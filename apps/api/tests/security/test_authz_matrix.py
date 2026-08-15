@@ -70,6 +70,33 @@ _EXPECTED_ROUTE_AUTH: dict[tuple[str, str], AuthRequirement] = {
         "DELETE",
     ): AuthRequirement.WORKSPACE_MEMBER,
     ("/v1/invitations/{token}:accept", "POST"): AuthRequirement.AUTHENTICATED,
+    ("/v1/workspaces/{workspace_id}/threads", "POST"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/threads", "GET"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/threads/{thread_id}", "GET"): AuthRequirement.WORKSPACE_MEMBER,
+    (
+        "/v1/workspaces/{workspace_id}/threads/{thread_id}",
+        "PATCH",
+    ): AuthRequirement.WORKSPACE_MEMBER,
+    (
+        "/v1/workspaces/{workspace_id}/threads/{thread_id}",
+        "DELETE",
+    ): AuthRequirement.WORKSPACE_MEMBER,
+    (
+        "/v1/workspaces/{workspace_id}/threads/{thread_id}/messages",
+        "GET",
+    ): AuthRequirement.WORKSPACE_MEMBER,
+    (
+        "/v1/workspaces/{workspace_id}/threads/{thread_id}/messages",
+        "POST",
+    ): AuthRequirement.WORKSPACE_MEMBER,
+    (
+        "/v1/workspaces/{workspace_id}/generations/{generation_id}",
+        "DELETE",
+    ): AuthRequirement.WORKSPACE_MEMBER,
+    (
+        "/v1/workspaces/{workspace_id}/generations/{generation_id}",
+        "GET",
+    ): AuthRequirement.WORKSPACE_MEMBER,
 }
 
 

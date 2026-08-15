@@ -118,6 +118,55 @@ class PasswordResetToken:
     created_at: datetime
 
 
+class MessageRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+
+class MessageStatus(StrEnum):
+    """A persisted message's terminal state (§8.1). Deliberately excludes
+    'error': an error before any token flowed persists no message row at
+    all, and an error mid-stream persists whatever content already
+    accumulated as PARTIAL — 'error' exists only as a done-*event*
+    status (see domain/streaming.py's GenerationStatus), never a
+    persisted message status."""
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True, slots=True)
+class Thread:
+    id: UUID
+    workspace_id: UUID
+    created_by: UUID
+    title: str | None
+    settings: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class Message:
+    id: UUID
+    workspace_id: UUID
+    thread_id: UUID
+    seq: int
+    role: MessageRole
+    content: str
+    status: MessageStatus
+    client_message_id: str | None
+    model: str | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    cost_microcents: int | None
+    grounded: bool
+    created_at: datetime
+
+
 @dataclass(frozen=True, slots=True)
 class RefreshToken:
     """Represents one node in a refresh-token family (ADR-7.2).

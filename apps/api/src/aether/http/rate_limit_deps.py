@@ -28,14 +28,19 @@ from aether.http.deps import AuthenticatedSession, get_container, get_current_se
 class RateLimitClass(StrEnum):
     AUTH = "auth"  # register, login, refresh, logout, password-reset, invitation accept
     CHEAP = "cheap"  # reads and routine mutations
+    HEAVY = "heavy"  # LLM/upload — §4.3's resource catalog RL column
 
 
 # (limit, window_seconds). "auth" is deliberately stricter — brute-force
 # and credential-stuffing protection (§7.5 attack-surface review) is the
-# whole point of that class existing separately from "cheap".
+# whole point of that class existing separately from "cheap". "heavy" is
+# stricter than "cheap" but far looser than "auth": it's abuse/DoS
+# protection at the app tier, not budget enforcement — the Usage
+# Metering service (§3.2.14, S4) is where real cost control lives.
 _LIMITS: dict[RateLimitClass, tuple[int, int]] = {
     RateLimitClass.AUTH: (10, 60),
     RateLimitClass.CHEAP: (120, 60),
+    RateLimitClass.HEAVY: (30, 60),
 }
 
 

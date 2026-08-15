@@ -72,3 +72,14 @@ class InvalidInvitationError(DomainError):
 class InvalidPasswordResetTokenError(DomainError):
     """A password-reset token was unknown, expired, or already consumed.
     One error for all three cases (ADR-11.1: enumeration-safe path)."""
+
+
+class ThreadNotFoundError(DomainError):
+    """Referenced thread id does not exist in this workspace (or is
+    soft-deleted)."""
+
+
+class GenerationNotFoundError(DomainError):
+    """Referenced generation id has no live entry in the Redis stream
+    buffer — either it never existed, already completed and its buffer
+    TTL expired, or it belongs to a different workspace."""
