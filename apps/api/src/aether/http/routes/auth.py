@@ -102,6 +102,7 @@ async def logout(
 ) -> None:
     await container.logout_user.execute(
         LogoutUserCommand(
+            user_id=session.user_id,
             jti=session.jti,
             access_token_expires_at=session.expires_at,
             raw_refresh_token=refresh_token,

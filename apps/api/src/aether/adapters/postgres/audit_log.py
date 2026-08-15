@@ -1,9 +1,14 @@
 """Postgres-backed AuditLogPort implementation (FR-AD-1, §3.7.3).
 
-Connection-bound, same reasoning as workspace_repository.py — writing the
-audit event in the same transaction as the business mutation it records
-means the two either both commit or both roll back, never one without
-the other.
+Accepts either a bare Pool or a Connection. Workspace-scoped mutations
+pass the request's already-open, tenant-scoped Connection, so the audit
+write commits or rolls back atomically with the business mutation it
+records. Auth-plane events (registration, login, logout) have no
+workspace — a fresh pool-acquired connection has never had
+app.tenant_id set, so current_setting(...) returns SQL NULL, which
+satisfies audit_events' `workspace_id IS NOT DISTINCT FROM NULL` policy
+with no explicit SET LOCAL needed; the singleton, pool-bound instance in
+Container is used for exactly that case.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from aether.ports.audit import AuditEvent
 
 
 class PostgresAuditLog:
-    def __init__(self, conn: asyncpg.Connection) -> None:
+    def __init__(self, conn: asyncpg.Pool | asyncpg.Connection) -> None:
         self._conn = conn
 
     async def record(

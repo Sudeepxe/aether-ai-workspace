@@ -70,6 +70,10 @@ class Container:
     clock: ClockPort
     ids: IdPort
     revocations: RevocationPort
+    audit_log: AuditLogPort
+    """Pool-bound, used for auth-plane (workspace_id=None) events only —
+    see adapters/postgres/audit_log.py's docstring for why that's safe
+    without per-request tenant scoping."""
 
     register_user: RegisterUser
     login_user: LoginUser
@@ -200,6 +204,7 @@ async def build_container(settings: Settings) -> Container:
     users = PostgresUserRepository(db_pool)
     refresh_tokens = PostgresRefreshTokenRepository(db_pool)
     invitations = PostgresInvitationRepository(db_pool)
+    audit_log = PostgresAuditLog(db_pool)
     hasher = Argon2PasswordHasher()
     tokens = EdDSATokenSigner(
         signing_key_b64=settings.jwt_signing_key,
@@ -221,7 +226,8 @@ async def build_container(settings: Settings) -> Container:
         clock=clock,
         ids=ids,
         revocations=revocations,
-        register_user=RegisterUser(users=users, hasher=hasher, ids=ids),
+        audit_log=audit_log,
+        register_user=RegisterUser(users=users, hasher=hasher, audit_log=audit_log, ids=ids),
         login_user=LoginUser(
             users=users,
             refresh_tokens=refresh_tokens,
@@ -229,6 +235,7 @@ async def build_container(settings: Settings) -> Container:
             tokens=tokens,
             clock=clock,
             ids=ids,
+            audit_log=audit_log,
             refresh_ttl_seconds=settings.jwt_refresh_ttl_seconds,
         ),
         refresh_session=RefreshSession(
@@ -239,7 +246,13 @@ async def build_container(settings: Settings) -> Container:
             refresh_ttl_seconds=settings.jwt_refresh_ttl_seconds,
             grace_seconds=settings.jwt_refresh_grace_seconds,
         ),
-        logout_user=LogoutUser(refresh_tokens=refresh_tokens, revocations=revocations, clock=clock),
+        logout_user=LogoutUser(
+            refresh_tokens=refresh_tokens,
+            revocations=revocations,
+            clock=clock,
+            audit_log=audit_log,
+            ids=ids,
+        ),
         revoke_user_sessions=RevokeUserSessions(refresh_tokens=refresh_tokens, clock=clock),
         refresh_ttl_seconds=settings.jwt_refresh_ttl_seconds,
     )

@@ -12,13 +12,15 @@ from datetime import datetime
 from uuid import UUID
 
 from aether.app.auth.tokens import hash_refresh_token
+from aether.ports.audit import AuditLogPort
 from aether.ports.repositories import RefreshTokenRepositoryPort
 from aether.ports.revocation import RevocationPort
-from aether.ports.security import ClockPort
+from aether.ports.security import ClockPort, IdPort
 
 
 @dataclass(frozen=True, slots=True)
 class LogoutUserCommand:
+    user_id: UUID
     jti: UUID
     access_token_expires_at: datetime
     raw_refresh_token: str | None
@@ -31,10 +33,14 @@ class LogoutUser:
         refresh_tokens: RefreshTokenRepositoryPort,
         revocations: RevocationPort,
         clock: ClockPort,
+        audit_log: AuditLogPort,
+        ids: IdPort,
     ) -> None:
         self._refresh_tokens = refresh_tokens
         self._revocations = revocations
         self._clock = clock
+        self._audit_log = audit_log
+        self._ids = ids
 
     async def execute(self, command: LogoutUserCommand) -> None:
         remaining = (command.access_token_expires_at - self._clock.now()).total_seconds()
@@ -48,3 +54,14 @@ class LogoutUser:
                 await self._refresh_tokens.revoke_family(
                     token.family_id, revoked_at=self._clock.now()
                 )
+
+        await self._audit_log.record(
+            id=self._ids.new_id(),
+            workspace_id=None,
+            actor_user_id=command.user_id,
+            actor_key_id=None,
+            action="auth.logout",
+            target_type="user",
+            target_id=command.user_id,
+            metadata={},
+        )

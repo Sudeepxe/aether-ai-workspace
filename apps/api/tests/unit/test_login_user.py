@@ -15,6 +15,7 @@ from tests.unit.fakes.auth import (
     FakeTokenPort,
     FakeUserRepository,
 )
+from tests.unit.fakes.workspaces import FakeAuditLog
 
 pytestmark = pytest.mark.unit
 
@@ -40,6 +41,7 @@ async def _seeded_use_case() -> tuple[LoginUser, FakeUserRepository, FakeRefresh
         tokens=FakeTokenPort(clock=clock),
         clock=clock,
         ids=ids,
+        audit_log=FakeAuditLog(),
         refresh_ttl_seconds=604_800,
     )
     return use_case, users, refresh_tokens
