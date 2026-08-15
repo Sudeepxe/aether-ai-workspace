@@ -26,6 +26,7 @@ from tests.unit.fakes.auth import (
     FakeTokenPort,
     FakeUserRepository,
 )
+from tests.unit.fakes.rate_limit import FakeRateLimiter
 from tests.unit.fakes.workspaces import FakeAuditLog
 
 _REFRESH_TTL = 604_800
@@ -46,6 +47,7 @@ class FakeContainer:
         tokens = FakeTokenPort(clock=clock)
         revocations = FakeRevocationPort()
         audit_log = FakeAuditLog()
+        rate_limiter = FakeRateLimiter()
 
         self.users = users
         self.refresh_tokens = refresh_tokens
@@ -55,6 +57,7 @@ class FakeContainer:
         self.ids = ids
         self.revocations = revocations
         self.audit_log = audit_log
+        self.rate_limiter = rate_limiter
         self.refresh_ttl_seconds = _REFRESH_TTL
 
         self.register_user = RegisterUser(users=users, hasher=hasher, audit_log=audit_log, ids=ids)

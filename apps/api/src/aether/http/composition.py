@@ -29,6 +29,11 @@ from aether.adapters.postgres.refresh_token_repository import PostgresRefreshTok
 from aether.adapters.postgres.user_repository import PostgresUserRepository
 from aether.adapters.postgres.workspace_repository import PostgresWorkspaceRepository
 from aether.adapters.redis.denylist import RedisJtiDenylist
+from aether.adapters.redis.rate_limiter import (
+    FailOpenRateLimiter,
+    LocalTokenBucketRateLimiter,
+    RedisTokenBucketRateLimiter,
+)
 from aether.app.auth.login_user import LoginUser
 from aether.app.auth.logout_user import LogoutUser
 from aether.app.auth.refresh_session import RefreshSession
@@ -47,6 +52,7 @@ from aether.app.workspaces.update_workspace import UpdateWorkspace
 from aether.config import Settings
 from aether.ports.audit import AuditLogPort
 from aether.ports.outbox import OutboxRepositoryPort
+from aether.ports.rate_limit import RateLimitPort
 from aether.ports.repositories import (
     InvitationRepositoryPort,
     Membership,
@@ -84,6 +90,7 @@ class Container:
     see adapters/postgres/audit_log.py's docstring for why that's safe
     without per-request tenant scoping."""
     outbox: OutboxRepositoryPort
+    rate_limiter: RateLimitPort
 
     register_user: RegisterUser
     login_user: LoginUser
@@ -231,6 +238,10 @@ async def build_container(settings: Settings) -> Container:
     clock = SystemClock()
     ids = Uuid7Generator()
     revocations = RedisJtiDenylist(redis_client)
+    rate_limiter = FailOpenRateLimiter(
+        RedisTokenBucketRateLimiter(redis_client, clock=clock),
+        LocalTokenBucketRateLimiter(clock=clock),
+    )
 
     revoke_user_sessions = RevokeUserSessions(refresh_tokens=refresh_tokens, clock=clock)
 
@@ -246,6 +257,7 @@ async def build_container(settings: Settings) -> Container:
         clock=clock,
         ids=ids,
         revocations=revocations,
+        rate_limiter=rate_limiter,
         audit_log=audit_log,
         outbox=outbox,
         register_user=RegisterUser(users=users, hasher=hasher, audit_log=audit_log, ids=ids),

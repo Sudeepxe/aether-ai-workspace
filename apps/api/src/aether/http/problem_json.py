@@ -1,12 +1,19 @@
 """RFC 9457 Problem+JSON error envelope (§3.6.1): ``{type, title, status,
 detail, instance, correlation_id, code}`` on every non-2xx response.
 
-Three handler classes are registered by ``install_error_handlers``:
+Four handler classes are registered by ``install_error_handlers``:
 - One per domain error type (the existing per-exception-type mapping,
   now producing the full envelope instead of a bare ``{"detail": ...}``).
 - ``RequestValidationError`` (Pydantic/FastAPI request-body validation
   failures) -> 400, since those aren't domain errors but still need the
   same envelope shape, not FastAPI's default ``{"detail": [...]}``.
+- ``HTTPException`` (FastAPI's own, e.g. authz.py's ``require_capability``
+  403, or rate-limiting's 429) — FastAPI registers a default handler for
+  this on every app that produces ``{"detail": ...}``; without overriding
+  it here, every plain ``raise HTTPException(...)`` call site would
+  silently bypass the envelope entirely, which is exactly what happened
+  until this was added. Preserves any ``headers`` the exception carries
+  (e.g. ``Retry-After``).
 - A catch-all for any other ``Exception`` -> 500, whose ``detail`` is
   always the same generic string — an unhandled exception's message
   might contain internals (SQL, file paths, stack fragments) that must
@@ -20,7 +27,7 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -31,6 +38,18 @@ log = get_logger(__name__)
 
 _PROBLEM_MEDIA_TYPE = "application/problem+json"
 _CAMEL_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
+
+_STATUS_CODES: dict[int, tuple[str, str]] = {
+    400: ("bad_request", "Bad Request"),
+    401: ("unauthorized", "Unauthorized"),
+    403: ("forbidden", "Forbidden"),
+    404: ("not_found", "Not Found"),
+    405: ("method_not_allowed", "Method Not Allowed"),
+    409: ("conflict", "Conflict"),
+    413: ("payload_too_large", "Payload Too Large"),
+    422: ("unprocessable_entity", "Unprocessable Entity"),
+    429: ("rate_limited", "Too Many Requests"),
+}
 
 
 def _code_and_title(exc_type: type[Exception]) -> tuple[str, str]:
@@ -45,12 +64,19 @@ def _code_and_title(exc_type: type[Exception]) -> tuple[str, str]:
 
 
 def _problem_response(
-    request: Request, *, status_code: int, code: str, title: str, detail: str
+    request: Request,
+    *,
+    status_code: int,
+    code: str,
+    title: str,
+    detail: str,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     correlation_id = getattr(request.state, "request_id", None)
     return JSONResponse(
         status_code=status_code,
         media_type=_PROBLEM_MEDIA_TYPE,
+        headers=headers,
         content={
             "type": f"urn:aether:error:{code}",
             "title": title,
@@ -101,6 +127,21 @@ def install_error_handlers(app: FastAPI, *, error_status: dict[type[DomainError]
         )
 
     app.add_exception_handler(RequestValidationError, _validation_handler)
+
+    async def _http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, HTTPException)  # noqa: S101 — registered for this type only
+        code, title = _STATUS_CODES.get(exc.status_code, ("http_error", "HTTP Error"))
+        headers = dict(exc.headers) if exc.headers else None
+        return _problem_response(
+            request,
+            status_code=exc.status_code,
+            code=code,
+            title=title,
+            detail=str(exc.detail),
+            headers=headers,
+        )
+
+    app.add_exception_handler(HTTPException, _http_exception_handler)
 
     async def _unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
         log.error(

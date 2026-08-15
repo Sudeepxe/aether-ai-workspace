@@ -12,6 +12,7 @@ from collections.abc import Iterator
 
 import httpx
 import pytest
+import redis.asyncio as redis_asyncio
 from fastapi.testclient import TestClient
 
 from aether.adapters.clock import SystemClock
@@ -32,7 +33,13 @@ def _as_role(bootstrap_url: str, role: str, password: str) -> str:
 
 @pytest.fixture()
 def app_client(
-    postgres_url: str, redis_url: str, monkeypatch: pytest.MonkeyPatch
+    postgres_url: str,
+    redis_url: str,
+    redis_client: redis_asyncio.Redis,  # unused directly: its flush-on-teardown
+    # keeps rate-limit buckets isolated across tests/files sharing this
+    # session-scoped Redis, since TestClient always presents the same
+    # fake caller IP.
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[TestClient]:
     monkeypatch.setenv("AETHER_DATABASE_URL", _as_role(postgres_url, "app_api", "app-api-dev-only"))
     monkeypatch.setenv("AETHER_REDIS_URL", redis_url)

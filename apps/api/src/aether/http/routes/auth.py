@@ -24,6 +24,7 @@ from aether.http.deps import (
     get_container,
     get_current_session,
 )
+from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_ip, rate_limit_by_user
 from aether.http.schemas.auth import (
     AccessTokenResponse,
     ConfirmPasswordResetRequest,
@@ -41,6 +42,7 @@ router = APIRouter(prefix="/v1/auth", tags=["auth"])
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     openapi_extra=route_auth(AuthRequirement.PUBLIC),
+    dependencies=[Depends(rate_limit_by_ip(RateLimitClass.AUTH))],
 )
 async def register(
     body: RegisterRequest, container: Container = Depends(get_container)
@@ -54,7 +56,10 @@ async def register(
 
 
 @router.post(
-    "/login", response_model=AccessTokenResponse, openapi_extra=route_auth(AuthRequirement.PUBLIC)
+    "/login",
+    response_model=AccessTokenResponse,
+    openapi_extra=route_auth(AuthRequirement.PUBLIC),
+    dependencies=[Depends(rate_limit_by_ip(RateLimitClass.AUTH))],
 )
 async def login(
     body: LoginRequest,
@@ -72,7 +77,10 @@ async def login(
 
 
 @router.post(
-    "/refresh", response_model=AccessTokenResponse, openapi_extra=route_auth(AuthRequirement.PUBLIC)
+    "/refresh",
+    response_model=AccessTokenResponse,
+    openapi_extra=route_auth(AuthRequirement.PUBLIC),
+    dependencies=[Depends(rate_limit_by_ip(RateLimitClass.AUTH))],
 )
 async def refresh(
     response: Response,
@@ -97,6 +105,7 @@ async def refresh(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
     openapi_extra=route_auth(AuthRequirement.AUTHENTICATED),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.AUTH))],
 )
 async def logout(
     response: Response,
@@ -119,6 +128,7 @@ async def logout(
     "/password-reset:request",
     status_code=status.HTTP_202_ACCEPTED,
     openapi_extra=route_auth(AuthRequirement.PUBLIC),
+    dependencies=[Depends(rate_limit_by_ip(RateLimitClass.AUTH))],
 )
 async def request_password_reset(
     body: RequestPasswordResetRequest, container: Container = Depends(get_container)
@@ -133,6 +143,7 @@ async def request_password_reset(
     "/password-reset:confirm",
     status_code=status.HTTP_204_NO_CONTENT,
     openapi_extra=route_auth(AuthRequirement.PUBLIC),
+    dependencies=[Depends(rate_limit_by_ip(RateLimitClass.AUTH))],
 )
 async def confirm_password_reset(
     body: ConfirmPasswordResetRequest, container: Container = Depends(get_container)

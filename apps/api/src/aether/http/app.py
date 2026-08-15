@@ -114,6 +114,19 @@ def create_app() -> FastAPI:
         finally:
             structlog.contextvars.unbind_contextvars("correlation_id")
         response.headers[REQUEST_ID_HEADER] = request_id
+        # Applied here, not by the rate-limit dependency directly: a
+        # Response object mutated inside a dependency is discarded
+        # whenever anything downstream raises (the dependency's own 429,
+        # or an ordinary domain error from the route itself), so headers
+        # must be merged onto whatever response actually goes out —
+        # after call_next(), which sits outside exception handling.
+        rate_limit = getattr(request.state, "rate_limit", None)
+        if rate_limit is not None:
+            response.headers["RateLimit-Limit"] = str(rate_limit.limit)
+            response.headers["RateLimit-Remaining"] = str(rate_limit.remaining)
+            response.headers["RateLimit-Reset"] = str(rate_limit.reset_seconds)
+            if not rate_limit.allowed:
+                response.headers["Retry-After"] = str(rate_limit.reset_seconds)
         return response
 
     @app.get("/healthz", tags=["ops"], include_in_schema=False)

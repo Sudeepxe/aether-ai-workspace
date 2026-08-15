@@ -35,6 +35,7 @@ from aether.http.deps import (
     get_new_workspace_connection,
     get_workspace_scope,
 )
+from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
 from aether.http.schemas.workspaces import (
     CreateWorkspaceRequest,
     MembershipResponse,
@@ -78,6 +79,7 @@ def _to_membership_response(membership: Membership) -> MembershipResponse:
     response_model=WorkspaceResponse,
     status_code=status.HTTP_201_CREATED,
     openapi_extra=route_auth(AuthRequirement.AUTHENTICATED),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
 )
 async def create_workspace(
     body: CreateWorkspaceRequest,
@@ -99,6 +101,7 @@ async def create_workspace(
     "/workspaces/{workspace_id}",
     response_model=WorkspaceResponse,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
 )
 async def get_workspace(
     workspace_id: UUID,
@@ -114,6 +117,7 @@ async def get_workspace(
     "/workspaces/{workspace_id}",
     response_model=WorkspaceResponse,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
 )
 async def update_workspace(
     workspace_id: UUID,
@@ -147,6 +151,7 @@ async def update_workspace(
     "/workspaces/{workspace_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
 )
 async def delete_workspace(
     workspace_id: UUID, scope: WorkspaceScope = Depends(get_workspace_scope)
@@ -163,6 +168,7 @@ async def delete_workspace(
     "/workspaces/{workspace_id}/members",
     response_model=list[MembershipResponse],
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
 )
 async def list_members(
     workspace_id: UUID, scope: WorkspaceScope = Depends(get_workspace_scope)
@@ -175,6 +181,7 @@ async def list_members(
     "/workspaces/{workspace_id}/members/{user_id}",
     response_model=MembershipResponse,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
 )
 async def update_member_role(
     workspace_id: UUID,
@@ -198,6 +205,7 @@ async def update_member_role(
     "/workspaces/{workspace_id}/members/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
 )
 async def remove_member(
     workspace_id: UUID, user_id: UUID, scope: WorkspaceScope = Depends(get_workspace_scope)

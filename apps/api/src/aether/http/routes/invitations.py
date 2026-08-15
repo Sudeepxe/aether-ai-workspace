@@ -19,6 +19,7 @@ from aether.http.deps import (
     get_invitation_acceptance_scope,
     get_workspace_scope,
 )
+from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
 from aether.http.schemas.workspaces import (
     CreateInvitationRequest,
     InvitationResponse,
@@ -55,6 +56,7 @@ def _to_membership_response(membership: Membership) -> MembershipResponse:
     response_model=InvitationResponse,
     status_code=status.HTTP_201_CREATED,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.AUTH))],
 )
 async def create_invitation(
     workspace_id: UUID,
@@ -80,6 +82,7 @@ async def create_invitation(
     "/workspaces/{workspace_id}/invitations/{invitation_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.AUTH))],
 )
 async def revoke_invitation(
     workspace_id: UUID,
@@ -100,6 +103,7 @@ async def revoke_invitation(
     "/invitations/{token}:accept",
     response_model=MembershipResponse,
     openapi_extra=route_auth(AuthRequirement.AUTHENTICATED),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.AUTH))],
 )
 async def accept_invitation(
     token: str,

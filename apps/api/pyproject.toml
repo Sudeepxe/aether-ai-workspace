@@ -71,6 +71,13 @@ ignore = ["E501"]  # line length handled by formatter
           # FastAPI's own documented DI idiom, not the mutable-default-
           # argument footgun this rule exists to catch.
 ]
+"src/aether/adapters/redis/rate_limiter.py" = [
+  "S105", # the Lua script constant trips the hardcoded-password
+          # heuristic; it's Lua source, not a credential. A trailing
+          # `# noqa` isn't usable here — everything after `"""` on the
+          # opening line of an unclosed multi-line string is part of the
+          # string itself, not a comment.
+]
 
 # ---------------------------------------------------------------- mypy -----
 [tool.mypy]
