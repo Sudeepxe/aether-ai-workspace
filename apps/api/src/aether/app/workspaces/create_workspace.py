@@ -46,7 +46,14 @@ class CreateWorkspace:
 
     async def execute(self, command: CreateWorkspaceCommand) -> Workspace:
         workspace_id = command.workspace_id
-        slug = f"{_slugify(command.name)}-{str(workspace_id)[:8]}"
+        # The *last* 8 hex chars, not the first: workspace_id is a
+        # UUIDv7 (ADR-4.3), whose first 48 bits are a millisecond
+        # timestamp — the first 8 hex chars are therefore nearly
+        # constant across any ~65-second window (2**32 ms), so two
+        # same-named workspaces created close together would collide on
+        # slug. The last 8 hex chars fall entirely within UUIDv7's
+        # random tail, which is what a uniqueness suffix actually needs.
+        slug = f"{_slugify(command.name)}-{workspace_id.hex[-8:]}"
 
         workspace = await self._workspaces.create(
             id=workspace_id, name=command.name, slug=slug, settings={}, model_policy={}
