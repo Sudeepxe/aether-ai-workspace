@@ -12,6 +12,8 @@ from aether.app.auth.login_user import LoginUserCommand
 from aether.app.auth.logout_user import LogoutUserCommand
 from aether.app.auth.refresh_session import RefreshSessionCommand
 from aether.app.auth.register_user import RegisterUserCommand
+from aether.app.password_reset.request_password_reset import RequestPasswordResetCommand
+from aether.app.password_reset.reset_password import ResetPasswordCommand
 from aether.domain.errors import InvalidRefreshTokenError
 from aether.http.authz import AuthRequirement, route_auth
 from aether.http.composition import Container
@@ -24,8 +26,10 @@ from aether.http.deps import (
 )
 from aether.http.schemas.auth import (
     AccessTokenResponse,
+    ConfirmPasswordResetRequest,
     LoginRequest,
     RegisterRequest,
+    RequestPasswordResetRequest,
     UserResponse,
 )
 
@@ -109,3 +113,30 @@ async def logout(
         )
     )
     clear_refresh_cookie(response)
+
+
+@router.post(
+    "/password-reset:request",
+    status_code=status.HTTP_202_ACCEPTED,
+    openapi_extra=route_auth(AuthRequirement.PUBLIC),
+)
+async def request_password_reset(
+    body: RequestPasswordResetRequest, container: Container = Depends(get_container)
+) -> None:
+    # 202 unconditionally — RequestPasswordReset itself is what makes
+    # this enumeration-safe (a no-op for an unknown/OAuth-only email);
+    # the route never learns, let alone reports, which branch it took.
+    await container.request_password_reset.execute(RequestPasswordResetCommand(email=body.email))
+
+
+@router.post(
+    "/password-reset:confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+    openapi_extra=route_auth(AuthRequirement.PUBLIC),
+)
+async def confirm_password_reset(
+    body: ConfirmPasswordResetRequest, container: Container = Depends(get_container)
+) -> None:
+    await container.reset_password.execute(
+        ResetPasswordCommand(raw_token=body.token, new_password=body.new_password)
+    )

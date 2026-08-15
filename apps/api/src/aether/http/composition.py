@@ -21,6 +21,9 @@ from aether.adapters.postgres.audit_log import PostgresAuditLog
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
 from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
 from aether.adapters.postgres.outbox_repository import PostgresOutboxRepository
+from aether.adapters.postgres.password_reset_token_repository import (
+    PostgresPasswordResetTokenRepository,
+)
 from aether.adapters.postgres.pool import create_pool
 from aether.adapters.postgres.refresh_token_repository import PostgresRefreshTokenRepository
 from aether.adapters.postgres.user_repository import PostgresUserRepository
@@ -34,6 +37,8 @@ from aether.app.auth.revoke_user_sessions import RevokeUserSessions
 from aether.app.invitations.accept_invitation import AcceptInvitation
 from aether.app.invitations.create_invitation import CreateInvitation
 from aether.app.invitations.revoke_invitation import RevokeInvitation
+from aether.app.password_reset.request_password_reset import RequestPasswordReset
+from aether.app.password_reset.reset_password import ResetPassword
 from aether.app.workspaces.create_workspace import CreateWorkspace
 from aether.app.workspaces.delete_workspace import DeleteWorkspace
 from aether.app.workspaces.get_workspace import GetWorkspace
@@ -46,6 +51,7 @@ from aether.ports.repositories import (
     InvitationRepositoryPort,
     Membership,
     MembershipRepositoryPort,
+    PasswordResetTokenRepositoryPort,
     RefreshTokenRepositoryPort,
     UserRepositoryPort,
     WorkspaceRepositoryPort,
@@ -67,6 +73,7 @@ class Container:
     per-request tenant context — this is the instance used for the
     accept-by-token lookup, which by definition runs before any tenant
     scope is known. See http/deps.py's get_invitation_acceptance_scope."""
+    password_reset_tokens: PasswordResetTokenRepositoryPort
     hasher: PasswordHasherPort
     tokens: TokenPort
     clock: ClockPort
@@ -76,12 +83,15 @@ class Container:
     """Pool-bound, used for auth-plane (workspace_id=None) events only —
     see adapters/postgres/audit_log.py's docstring for why that's safe
     without per-request tenant scoping."""
+    outbox: OutboxRepositoryPort
 
     register_user: RegisterUser
     login_user: LoginUser
     refresh_session: RefreshSession
     logout_user: LogoutUser
     revoke_user_sessions: RevokeUserSessions
+    request_password_reset: RequestPasswordReset
+    reset_password: ResetPassword
 
     refresh_ttl_seconds: int
 
@@ -209,7 +219,9 @@ async def build_container(settings: Settings) -> Container:
     users = PostgresUserRepository(db_pool)
     refresh_tokens = PostgresRefreshTokenRepository(db_pool)
     invitations = PostgresInvitationRepository(db_pool)
+    password_reset_tokens = PostgresPasswordResetTokenRepository(db_pool)
     audit_log = PostgresAuditLog(db_pool)
+    outbox = PostgresOutboxRepository(db_pool)
     hasher = Argon2PasswordHasher()
     tokens = EdDSATokenSigner(
         signing_key_b64=settings.jwt_signing_key,
@@ -220,18 +232,22 @@ async def build_container(settings: Settings) -> Container:
     ids = Uuid7Generator()
     revocations = RedisJtiDenylist(redis_client)
 
+    revoke_user_sessions = RevokeUserSessions(refresh_tokens=refresh_tokens, clock=clock)
+
     return Container(
         db_pool=db_pool,
         redis_client=redis_client,
         users=users,
         refresh_tokens=refresh_tokens,
         invitations=invitations,
+        password_reset_tokens=password_reset_tokens,
         hasher=hasher,
         tokens=tokens,
         clock=clock,
         ids=ids,
         revocations=revocations,
         audit_log=audit_log,
+        outbox=outbox,
         register_user=RegisterUser(users=users, hasher=hasher, audit_log=audit_log, ids=ids),
         login_user=LoginUser(
             users=users,
@@ -258,6 +274,22 @@ async def build_container(settings: Settings) -> Container:
             audit_log=audit_log,
             ids=ids,
         ),
-        revoke_user_sessions=RevokeUserSessions(refresh_tokens=refresh_tokens, clock=clock),
+        revoke_user_sessions=revoke_user_sessions,
+        request_password_reset=RequestPasswordReset(
+            users=users,
+            password_reset_tokens=password_reset_tokens,
+            outbox=outbox,
+            clock=clock,
+            ids=ids,
+        ),
+        reset_password=ResetPassword(
+            users=users,
+            password_reset_tokens=password_reset_tokens,
+            hasher=hasher,
+            revoke_user_sessions=revoke_user_sessions,
+            audit_log=audit_log,
+            clock=clock,
+            ids=ids,
+        ),
         refresh_ttl_seconds=settings.jwt_refresh_ttl_seconds,
     )

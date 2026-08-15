@@ -56,6 +56,8 @@ class UserRepositoryPort(Protocol):
 
     async def get_by_email(self, email: str) -> User | None: ...
 
+    async def update_password_hash(self, user_id: UUID, *, password_hash: str) -> None: ...
+
 
 class RefreshTokenRepositoryPort(Protocol):
     async def create(

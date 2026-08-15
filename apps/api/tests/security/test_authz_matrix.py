@@ -54,6 +54,8 @@ _EXPECTED_ROUTE_AUTH: dict[tuple[str, str], AuthRequirement] = {
     ("/v1/auth/login", "POST"): AuthRequirement.PUBLIC,
     ("/v1/auth/refresh", "POST"): AuthRequirement.PUBLIC,
     ("/v1/auth/logout", "POST"): AuthRequirement.AUTHENTICATED,
+    ("/v1/auth/password-reset:request", "POST"): AuthRequirement.PUBLIC,
+    ("/v1/auth/password-reset:confirm", "POST"): AuthRequirement.PUBLIC,
     ("/v1/me", "GET"): AuthRequirement.AUTHENTICATED,
     ("/v1/workspaces", "POST"): AuthRequirement.AUTHENTICATED,
     ("/v1/workspaces/{workspace_id}", "GET"): AuthRequirement.WORKSPACE_MEMBER,
