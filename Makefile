@@ -44,6 +44,12 @@ typecheck: ## mypy --strict + tsc
 test: ## Python unit + architecture tests (integration lanes enable S1+)
 	cd $(API_DIR) && uv run pytest -m "unit or architecture" --cov
 
+test-integration: ## Real PG/Redis via testcontainers: integration + security marks (S1+)
+	cd $(API_DIR) && uv run pytest -m "integration or security" --cov --cov-append
+
+migrate: ## Apply Alembic migrations (needs AETHER_DATABASE_MIGRATOR_URL reachable)
+	cd $(API_DIR) && uv run alembic upgrade head
+
 build: ## Build container images
 	docker build -f infra/docker/api.Dockerfile -t aether-api:local .
 	docker build -f infra/docker/web.Dockerfile -t aether-web:local .

@@ -8,19 +8,30 @@ license = { text = "Apache-2.0" }
 dependencies = [
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.30,<1",
-  "pydantic>=2.8,<3",
+  "pydantic[email]>=2.8,<3",
   "pydantic-settings>=2.4,<3",
   "structlog>=24.1,<25",
+  "asyncpg>=0.29,<1",
+  "redis>=5.0,<6",
+  "argon2-cffi>=23.1,<24",
+  "pyjwt[crypto]>=2.9,<3",
+  "cryptography>=50.0,<51",  # >=50.0 for PYSEC-2026-3552 (below other fixed-in versions too)
+  "uuid-utils>=0.9,<1",
+  "alembic>=1.13,<2",
+  "greenlet>=3.0,<4",  # required by SQLAlchemy's async engine (Alembic's migration runner, migrations/env.py)
 ]
 
 [dependency-groups]
 dev = [
   "pytest>=8.3",
   "pytest-cov>=5.0",
+  "pytest-asyncio>=0.24,<1",
   "httpx>=0.27",
   "mypy>=1.11",
   "ruff>=0.6",
   "import-linter>=2.0",
+  "testcontainers[postgres,redis]>=4.8,<5",
+  "asgi-lifespan>=2.1,<3",
 ]
 
 [build-system]
@@ -50,7 +61,15 @@ select = [
 ignore = ["E501"]  # line length handled by formatter
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # assert is the point of tests
+"tests/**" = [
+  "S101",         # assert is the point of tests
+  "S105", "S106", # fixture literals like "wrong-password" aren't credentials
+]
+"src/aether/http/**" = [
+  "B008", # Depends(...)/Header(...)/Cookie(...) as argument defaults is
+          # FastAPI's own documented DI idiom, not the mutable-default-
+          # argument footgun this rule exists to catch.
+]
 
 # ---------------------------------------------------------------- mypy -----
 [tool.mypy]
@@ -60,6 +79,17 @@ mypy_path = "src"
 packages = ["aether"]
 warn_unreachable = true
 show_error_codes = true
+
+# asyncpg ships no py.typed marker / stubs (Sprint 1) — narrowly silenced
+# for that one package rather than loosening strict mode repo-wide.
+[[tool.mypy.overrides]]
+module = "asyncpg.*"
+ignore_missing_imports = true
+
+# testcontainers ships no py.typed marker either (integration tests only).
+[[tool.mypy.overrides]]
+module = "testcontainers.*"
+ignore_missing_imports = true
 
 # -------------------------------------------------------- import-linter ----
 # Enforces Blueprint §3.3: domain imports nothing internal; layered flow
@@ -89,11 +119,20 @@ forbidden_modules = [
   "aether.app", "aether.http", "aether.workers",
   "aether.domain", "aether.modules",
 ]
+# Ports (e.g. UserRepositoryPort.create() -> User) are typed against
+# domain entities/errors, so an adapter implementing a port transitively
+# reaches domain through it — ports re-export the specific domain types
+# each adapter needs (see ports/repositories.py, ports/security.py) so
+# that's the only doorway. This flag scopes the contract to what "ports
+# only" is actually enforcing: no adapter file may write
+# `from aether.domain import ...` directly.
+allow_indirect_imports = true
 
 # --------------------------------------------------------------- pytest ----
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
+asyncio_mode = "auto"
 markers = [
   "unit: fast, no I/O, fake ports only",
   "integration: real PG/Redis via testcontainers (enabled S1+)",
@@ -108,4 +147,4 @@ source = ["src/aether"]
 omit = ["src/aether/adapters/*"]  # vendor-glue exclusion, justified in SPRINT_0_PLAN §18
 
 [tool.coverage.report]
-fail_under = 0  # raised to 80 in S1 when domain logic exists (NFR-M-1)
+fail_under = 80  # NFR-M-1; combined unit+architecture+integration+security run is at 94%

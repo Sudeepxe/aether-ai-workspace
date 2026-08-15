@@ -16,10 +16,15 @@ def test_healthz_returns_ok(client: TestClient) -> None:
     assert resp.json() == {"status": "ok"}
 
 
-def test_readyz_returns_ok(client: TestClient) -> None:
+def test_readyz_without_lifespan_reports_degraded(client: TestClient) -> None:
+    """The plain `client` fixture never runs the app's lifespan (Starlette
+    only triggers it as a context manager), so app.state.container is
+    unset — readyz must report this honestly (200 + degraded), not crash.
+    The "ok when dependencies are actually reachable" case needs a real
+    DB/Redis and lives in tests/integration/test_readyz.py."""
     resp = client.get("/readyz")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
+    assert resp.json()["status"] == "degraded"
 
 
 def test_request_id_is_minted_when_absent(client: TestClient) -> None:

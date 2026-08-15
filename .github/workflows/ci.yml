@@ -119,11 +119,22 @@ jobs:
           args: --no-progress --offline docs README.md
           fail: true
 
-  # ---- future lanes: shape visible, disabled until their sprint ------------
   integration:
-    if: ${{ false }}   # ENABLED IN S1 — testcontainers PG/Redis, RLS suite, migrations N-1
+    # Real Postgres/Redis via testcontainers (docker is preinstalled on
+    # ubuntu-latest runners — no service containers/socket setup needed).
+    # Security-marked tests run here, not in the `security` job above: they
+    # need the same real PG/Redis fixtures (RLS canary, token-lifecycle,
+    # authz-matrix), so splitting them would just duplicate the container
+    # bring-up for no isolation benefit.
     runs-on: ubuntu-latest
-    steps: [{ run: "echo enabled in S1" }]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - name: Integration + security tests (real PG/Redis)
+        working-directory: apps/api
+        run: |
+          uv sync
+          uv run pytest -m "integration or security" --cov --cov-append --cov-report=xml
 
   e2e:
     if: ${{ false }}   # ENABLED IN S3 — Playwright vs test-profile compose

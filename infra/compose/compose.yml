@@ -64,6 +64,12 @@ services:
       dockerfile: infra/docker/api.Dockerfile
     environment:
       AETHER_ENV: dev
+      # app_api (ADR-8.1, least privilege, RLS-subject) — created by the
+      # first migration; run `make migrate` against the dev profile before
+      # starting these services.
+      AETHER_DATABASE_URL: postgresql://app_api:app-api-dev-only@postgres:5432/${POSTGRES_DB:-aether}
+      AETHER_DATABASE_MIGRATOR_URL: postgresql://${POSTGRES_USER:-aether}:${POSTGRES_PASSWORD:-aether-dev-only}@postgres:5432/${POSTGRES_DB:-aether}
+      AETHER_REDIS_URL: redis://redis:6379/0
     ports: ["8000:8000"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -77,7 +83,14 @@ services:
     command: ["python", "-m", "aether.workers.main"]
     environment:
       AETHER_ENV: dev
+      # app_api (ADR-8.1, least privilege, RLS-subject) — created by the
+      # first migration; run `make migrate` against the dev profile before
+      # starting these services.
+      AETHER_DATABASE_URL: postgresql://app_api:app-api-dev-only@postgres:5432/${POSTGRES_DB:-aether}
+      AETHER_DATABASE_MIGRATOR_URL: postgresql://${POSTGRES_USER:-aether}:${POSTGRES_PASSWORD:-aether-dev-only}@postgres:5432/${POSTGRES_DB:-aether}
+      AETHER_REDIS_URL: redis://redis:6379/0
     depends_on:
+      postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
 
 volumes:
