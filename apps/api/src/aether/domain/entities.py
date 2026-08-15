@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 
@@ -47,6 +48,8 @@ class Workspace:
     id: UUID
     name: str
     slug: str
+    settings: dict[str, Any]
+    model_policy: dict[str, Any]
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None
@@ -60,6 +63,59 @@ class Membership:
     role: MembershipRole
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class Invitation:
+    """A single-use, expiring workspace invitation (FR-ID-3, §8.1)."""
+
+    id: UUID
+    workspace_id: UUID
+    email: str
+    role: MembershipRole
+    token_hash: str
+    invited_by: UUID
+    expires_at: datetime
+    consumed_at: datetime | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AuditEvent:
+    """An immutable audit-log entry (FR-AD-1, §8.1). ``workspace_id`` is
+    None for system/auth-plane events (e.g. login) that precede any
+    workspace context."""
+
+    id: UUID
+    workspace_id: UUID | None
+    actor_user_id: UUID | None
+    actor_key_id: UUID | None
+    action: str
+    target_type: str
+    target_id: UUID
+    metadata: dict[str, Any]
+    occurred_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PasswordResetToken:
+    """A single-use, hashed, 30-minute-TTL password-reset token (ADR-11.1).
+
+    Deliberately its own table, not a reuse of ``invitations`` or
+    ``refresh_tokens`` — the shape is superficially similar (single-use,
+    hashed, expiring) but the semantics (who may consume it, what
+    consuming it does) are distinct enough that overloading an existing
+    table would only save one small migration at the cost of conflating
+    two different security-sensitive flows in one table's grants and
+    RLS-exemption reasoning.
+    """
+
+    id: UUID
+    user_id: UUID
+    token_hash: str
+    expires_at: datetime
+    consumed_at: datetime | None
+    created_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

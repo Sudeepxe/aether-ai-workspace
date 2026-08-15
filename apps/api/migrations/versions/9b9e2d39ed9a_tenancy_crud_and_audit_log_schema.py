@@ -12,9 +12,9 @@ dev/test only.
 Sprint 2 slice of the §8.1 schema catalog:
 
 - ``invitations`` — single-use, expiring workspace invitations (FR-ID-3).
-  Tenant-scoped (workspace_id), so it gets the identical forced-RLS
-  tenant_isolation policy established on ``memberships`` in Sprint 1 —
-  same pattern, not a new one.
+  Deliberately RLS-exempt, not the ``memberships`` pattern — see the
+  comment at its GRANT statement below for why (the accept-by-token flow
+  has no tenant context to set: the caller isn't a member yet).
 - ``audit_events`` — the immutable audit log (FR-AD-1, §8.1). Monthly
   range partitions from day one (ADR-8.3); ``app_api`` gets SELECT+INSERT
   only, no UPDATE/DELETE grant at all, so tampering by the running
@@ -63,16 +63,16 @@ def upgrade() -> None:
     )
     op.execute("CREATE INDEX invitations_workspace_id_idx ON invitations (workspace_id)")
 
-    op.execute("ALTER TABLE invitations ENABLE ROW LEVEL SECURITY")
-    op.execute("ALTER TABLE invitations FORCE ROW LEVEL SECURITY")
-    op.execute(
-        """
-        CREATE POLICY tenant_isolation ON invitations
-            USING (workspace_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
-            WITH CHECK (workspace_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
-        """
-    )
-
+    # Deliberately RLS-exempt, not the memberships pattern — invitations
+    # are *accepted* by a caller who is, by definition, not yet a member
+    # of the workspace, so no tenant context can exist at the point the
+    # accept flow needs to look a token up by its hash (the identical
+    # chicken-and-egg reason refresh_tokens has no RLS either: it's
+    # looked up by hash before any session exists). The token itself
+    # (128-bit, single-use) is the security boundary for that lookup, not
+    # tenant context. Admin-facing operations (create/list/revoke) always
+    # know workspace_id from the URL and enforce it as an explicit typed
+    # repository parameter (§3.7.2 layer 3) instead of relying on RLS.
     op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON invitations TO app_api")
 
     # --- audit_events (FR-AD-1, ADR-8.3) ------------------------------------

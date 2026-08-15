@@ -41,3 +41,34 @@ class RefreshTokenReusedError(DomainError):
 class UserNotFoundError(DomainError):
     """Referenced user id does not exist (internal-use; never surfaced to
     an unauthenticated caller as distinct from AuthenticationFailedError)."""
+
+
+class WorkspaceNotFoundError(DomainError):
+    """Referenced workspace id does not exist (or the caller has no
+    membership in it — RLS/route guards make those the same outcome)."""
+
+
+class MembershipNotFoundError(DomainError):
+    """Target user is not a member of the workspace."""
+
+
+class LastOwnerProtectionError(DomainError):
+    """Refused: this would leave the workspace with zero Owners (FR-ID-4
+    invariant — every workspace has >= 1 Owner at all times)."""
+
+
+class WorkspaceConcurrencyConflictError(DomainError):
+    """An If-Match/ETag precondition on a workspace mutation did not match
+    the current state — someone else changed it first."""
+
+
+class InvalidInvitationError(DomainError):
+    """An invitation token was unknown, expired, or already consumed. One
+    error for all three cases, deliberately — distinguishing them in the
+    response would let a caller enumerate valid-but-expired invitations
+    (same enumeration-safety posture as AuthenticationFailedError)."""
+
+
+class InvalidPasswordResetTokenError(DomainError):
+    """A password-reset token was unknown, expired, or already consumed.
+    One error for all three cases (ADR-11.1: enumeration-safe path)."""

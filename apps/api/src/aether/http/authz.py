@@ -7,12 +7,16 @@ runs at the end of ``create_app()``, not just in tests, so this is
 actually true of the running process, not just an assertion CI happens
 to check.
 
-Sprint 1 has two requirement levels because it has no workspace-scoped
+Sprint 1 had two requirement levels because it had no workspace-scoped
 route yet (register/login/refresh are pre-session; logout/me need a
-session but not a specific role). Role-scoped requirements, checked
-against the domain.policy capability table, are added the same way when
-the first workspace-scoped route lands (S2+) — this module is where that
-extension happens, not a redesign.
+session but not a specific role). Sprint 2 adds WORKSPACE_MEMBER for
+routes that need the caller to be *a* member of the workspace in the
+path — the specific-capability check (Admin vs Owner vs any member)
+still happens in the route body against domain.policy's role_may(), via
+the caller_membership already resolved by http/deps.py's
+get_workspace_scope; WORKSPACE_MEMBER only declares "this route is
+workspace-scoped", which is what the boot-time check and the generated
+authz-matrix both actually need to know.
 """
 
 from __future__ import annotations
@@ -20,9 +24,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from enum import StrEnum
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from fastapi.routing import APIRoute, _IncludedRouter
 from starlette.routing import BaseRoute
+
+from aether.domain.entities import MembershipRole
+from aether.domain.policy import Capability, role_may
 
 _EXEMPT_PATHS = frozenset({"/healthz", "/readyz", "/openapi.json", "/docs", "/redoc"})
 _EXTRA_KEY = "x-auth-requirement"
@@ -49,11 +56,24 @@ def _iter_api_routes(routes: Iterable[BaseRoute]) -> Iterator[APIRoute]:
 class AuthRequirement(StrEnum):
     PUBLIC = "public"
     AUTHENTICATED = "authenticated"
+    WORKSPACE_MEMBER = "workspace_member"
 
 
 def route_auth(requirement: AuthRequirement) -> dict[str, str]:
     """Pass as ``openapi_extra=route_auth(...)`` on a route decorator."""
     return {_EXTRA_KEY: requirement.value}
+
+
+def require_capability(role: MembershipRole, capability: Capability) -> None:
+    """The capability half of role-scoped enforcement (WORKSPACE_MEMBER
+    only proves the caller is *a* member — this proves they're the right
+    *kind* of member). Raises 403, not 404: by the time a route calls
+    this, get_workspace_scope has already 404'd a caller with no
+    membership at all, so a caller reaching here is a known member of a
+    known workspace — 403 correctly says "you can't", not "this doesn't
+    exist" (§3.6.1 taxonomy)."""
+    if not role_may(role, capability):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient role")
 
 
 class MissingAuthDeclarationError(RuntimeError):

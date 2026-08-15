@@ -26,14 +26,22 @@ from aether.domain.errors import (
     DomainError,
     EmailAlreadyRegisteredError,
     InvalidAccessTokenError,
+    InvalidInvitationError,
+    InvalidPasswordResetTokenError,
     InvalidRefreshTokenError,
+    LastOwnerProtectionError,
+    MembershipNotFoundError,
     RefreshTokenReusedError,
     UserNotFoundError,
+    WorkspaceConcurrencyConflictError,
+    WorkspaceNotFoundError,
 )
 from aether.http.authz import assert_all_routes_declare_auth
 from aether.http.composition import build_container
 from aether.http.routes.auth import router as auth_router
+from aether.http.routes.invitations import router as invitations_router
 from aether.http.routes.me import router as me_router
+from aether.http.routes.workspaces import router as workspaces_router
 from aether.logging import configure_logging, get_logger
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -47,6 +55,15 @@ _ERROR_STATUS: dict[type[DomainError], int] = {
     RefreshTokenReusedError: 401,
     InvalidAccessTokenError: 401,
     UserNotFoundError: 404,
+    WorkspaceNotFoundError: 404,
+    MembershipNotFoundError: 404,
+    LastOwnerProtectionError: 409,
+    WorkspaceConcurrencyConflictError: 409,
+    # One status for all three "unusable token" cases (unknown/expired/
+    # consumed), matching the one-error-type enumeration-safety posture
+    # already used for AuthenticationFailedError.
+    InvalidInvitationError: 404,
+    InvalidPasswordResetTokenError: 404,
 }
 
 
@@ -118,6 +135,8 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(me_router)
+    app.include_router(workspaces_router)
+    app.include_router(invitations_router)
 
     for error_type, status_code in _ERROR_STATUS.items():
 

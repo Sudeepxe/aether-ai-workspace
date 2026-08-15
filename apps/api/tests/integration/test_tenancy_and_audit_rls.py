@@ -50,66 +50,73 @@ async def _seed_two_tenants(bootstrap_pool: asyncpg.Pool) -> dict[str, uuid.UUID
 
 
 # --------------------------------------------------------------- invitations
+#
+# invitations is deliberately RLS-exempt (see the migration's own
+# comment): the accept-by-token flow has no tenant context to set, since
+# the caller isn't a member yet. These tests prove the two properties
+# that design actually depends on: the token-hash lookup works with zero
+# tenant context (the whole point of the design), and an explicit
+# workspace_id-scoped mutation correctly refuses to touch another
+# workspace's row (the "typed parameter" half of §3.7.2 layer 3, since
+# RLS isn't providing that backstop here).
 
 
 async def _seed_invitation(
     bootstrap_pool: asyncpg.Pool, *, workspace_id: uuid.UUID, invited_by: uuid.UUID
-) -> uuid.UUID:
+) -> tuple[uuid.UUID, str]:
     invitation_id = uuid.uuid4()
+    token_hash = uuid.uuid4().hex
     async with bootstrap_pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO invitations (id, workspace_id, email, role, token_hash, invited_by, expires_at) "
             "VALUES ($1, $2, 'invitee@example.com', 'member', $3, $4, now() + interval '7 days')",
             invitation_id,
             workspace_id,
-            uuid.uuid4().hex,
+            token_hash,
             invited_by,
         )
-    return invitation_id
+    return invitation_id, token_hash
 
 
-async def test_tenant_cannot_read_other_tenants_invitation(
+async def test_invitation_lookup_by_token_works_with_zero_tenant_context(
     db_pool: asyncpg.Pool, db_bootstrap_pool: asyncpg.Pool
 ) -> None:
     ids = await _seed_two_tenants(db_bootstrap_pool)
-    await _seed_invitation(
+    _, token_hash = await _seed_invitation(
         db_bootstrap_pool, workspace_id=ids["tenant_b"], invited_by=ids["user_b"]
     )
-    async with db_pool.acquire() as conn, conn.transaction():
-        await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(ids["tenant_a"]))
-        rows = await conn.fetch("SELECT id FROM invitations")
-    assert rows == []
-
-
-async def test_tenant_cannot_consume_other_tenants_invitation(
-    db_pool: asyncpg.Pool, db_bootstrap_pool: asyncpg.Pool
-) -> None:
-    ids = await _seed_two_tenants(db_bootstrap_pool)
-    invitation_b = await _seed_invitation(
-        db_bootstrap_pool, workspace_id=ids["tenant_b"], invited_by=ids["user_b"]
-    )
-    async with db_pool.acquire() as conn, conn.transaction():
-        await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(ids["tenant_a"]))
-        result = await conn.execute(
-            "UPDATE invitations SET consumed_at = now() WHERE id = $1", invitation_b
+    async with db_pool.acquire() as conn:
+        # Deliberately no SET LOCAL app.tenant_id at all — the accepting
+        # user has no workspace standing yet; the token is the entire
+        # proof of authorization for this read.
+        row = await conn.fetchrow(
+            "SELECT id, workspace_id FROM invitations WHERE token_hash = $1", token_hash
         )
-    assert result == "UPDATE 0"
+    assert row is not None
+    assert row["workspace_id"] == ids["tenant_b"]
 
 
-async def test_missing_tenant_context_blocks_invitation_insert(
+async def test_workspace_scoped_delete_refuses_another_workspaces_invitation(
     db_pool: asyncpg.Pool, db_bootstrap_pool: asyncpg.Pool
 ) -> None:
     ids = await _seed_two_tenants(db_bootstrap_pool)
-    with pytest.raises(asyncpg.exceptions.PostgresError):
-        async with db_pool.acquire() as conn, conn.transaction():
-            await conn.execute(
-                "INSERT INTO invitations (id, workspace_id, email, role, token_hash, invited_by, expires_at) "
-                "VALUES ($1, $2, 'x@example.com', 'member', $3, $4, now() + interval '7 days')",
-                uuid.uuid4(),
-                ids["tenant_a"],
-                uuid.uuid4().hex,
-                ids["user_a"],
-            )
+    invitation_b, _ = await _seed_invitation(
+        db_bootstrap_pool, workspace_id=ids["tenant_b"], invited_by=ids["user_b"]
+    )
+    async with db_pool.acquire() as conn:
+        # No RLS here — this proves the repository's explicit WHERE
+        # workspace_id = $1 clause is what does the isolating, since
+        # there's no RLS policy left to catch a mistake.
+        result = await conn.execute(
+            "DELETE FROM invitations WHERE workspace_id = $1 AND id = $2",
+            ids["tenant_a"],
+            invitation_b,
+        )
+    assert result == "DELETE 0"
+
+    async with db_bootstrap_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT id FROM invitations WHERE id = $1", invitation_b)
+    assert row is not None
 
 
 # --------------------------------------------------------------- audit_events

@@ -8,6 +8,7 @@ system via ``request.app.state.container``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 import asyncpg
 import redis.asyncio as redis_asyncio
@@ -16,17 +17,37 @@ from aether.adapters.argon2.hasher import Argon2PasswordHasher
 from aether.adapters.clock import SystemClock
 from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.jwt.eddsa import EdDSATokenSigner
+from aether.adapters.postgres.audit_log import PostgresAuditLog
+from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
+from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
 from aether.adapters.postgres.pool import create_pool
 from aether.adapters.postgres.refresh_token_repository import PostgresRefreshTokenRepository
 from aether.adapters.postgres.user_repository import PostgresUserRepository
+from aether.adapters.postgres.workspace_repository import PostgresWorkspaceRepository
 from aether.adapters.redis.denylist import RedisJtiDenylist
 from aether.app.auth.login_user import LoginUser
 from aether.app.auth.logout_user import LogoutUser
 from aether.app.auth.refresh_session import RefreshSession
 from aether.app.auth.register_user import RegisterUser
 from aether.app.auth.revoke_user_sessions import RevokeUserSessions
+from aether.app.invitations.accept_invitation import AcceptInvitation
+from aether.app.invitations.create_invitation import CreateInvitation
+from aether.app.invitations.revoke_invitation import RevokeInvitation
+from aether.app.workspaces.create_workspace import CreateWorkspace
+from aether.app.workspaces.delete_workspace import DeleteWorkspace
+from aether.app.workspaces.get_workspace import GetWorkspace
+from aether.app.workspaces.manage_members import ListMembers, RemoveMember, UpdateMemberRole
+from aether.app.workspaces.update_workspace import UpdateWorkspace
 from aether.config import Settings
-from aether.ports.repositories import RefreshTokenRepositoryPort, UserRepositoryPort
+from aether.ports.audit import AuditLogPort
+from aether.ports.repositories import (
+    InvitationRepositoryPort,
+    Membership,
+    MembershipRepositoryPort,
+    RefreshTokenRepositoryPort,
+    UserRepositoryPort,
+    WorkspaceRepositoryPort,
+)
 from aether.ports.revocation import RevocationPort
 from aether.ports.security import ClockPort, IdPort, PasswordHasherPort, TokenPort
 
@@ -38,6 +59,12 @@ class Container:
 
     users: UserRepositoryPort
     refresh_tokens: RefreshTokenRepositoryPort
+    invitations: InvitationRepositoryPort
+    """Pool-bound, not connection-scoped: invitations is RLS-exempt (see
+    its migration), so unlike workspaces/memberships it needs no
+    per-request tenant context — this is the instance used for the
+    accept-by-token lookup, which by definition runs before any tenant
+    scope is known. See http/deps.py's get_invitation_acceptance_scope."""
     hasher: PasswordHasherPort
     tokens: TokenPort
     clock: ClockPort
@@ -57,6 +84,113 @@ class Container:
         await self.redis_client.aclose()
 
 
+@dataclass
+class WorkspaceScope:
+    """Per-request, tenant-scoped composition — built fresh for every
+    workspace-scoped request by http/deps.py's get_workspace_scope, bound
+    to a connection that already has ``app.tenant_id`` set for the
+    request's lifetime (one transaction, committed/rolled back when the
+    request ends). Never held longer than one request; never shared
+    across requests, unlike the singleton Container.
+    """
+
+    conn: asyncpg.Connection
+    caller_membership: Membership
+
+    workspaces: WorkspaceRepositoryPort
+    memberships: MembershipRepositoryPort
+    invitations: InvitationRepositoryPort
+    audit_log: AuditLogPort
+
+    get_workspace: GetWorkspace
+    update_workspace: UpdateWorkspace
+    delete_workspace: DeleteWorkspace
+    list_members: ListMembers
+    update_member_role: UpdateMemberRole
+    remove_member: RemoveMember
+    create_invitation: CreateInvitation
+    revoke_invitation: RevokeInvitation
+
+
+def build_workspace_scope(
+    conn: asyncpg.Connection,
+    caller_membership: Membership,
+    *,
+    clock: ClockPort,
+    ids: IdPort,
+) -> WorkspaceScope:
+    workspaces = PostgresWorkspaceRepository(conn)
+    memberships = PostgresMembershipRepository(conn)
+    invitations = PostgresInvitationRepository(conn)
+    audit_log = PostgresAuditLog(conn)
+    return WorkspaceScope(
+        conn=conn,
+        caller_membership=caller_membership,
+        workspaces=workspaces,
+        memberships=memberships,
+        invitations=invitations,
+        audit_log=audit_log,
+        get_workspace=GetWorkspace(workspaces=workspaces),
+        update_workspace=UpdateWorkspace(workspaces=workspaces, audit_log=audit_log, ids=ids),
+        delete_workspace=DeleteWorkspace(
+            workspaces=workspaces, audit_log=audit_log, clock=clock, ids=ids
+        ),
+        list_members=ListMembers(memberships=memberships),
+        update_member_role=UpdateMemberRole(memberships=memberships, audit_log=audit_log, ids=ids),
+        remove_member=RemoveMember(memberships=memberships, audit_log=audit_log, ids=ids),
+        create_invitation=CreateInvitation(
+            invitations=invitations, audit_log=audit_log, clock=clock, ids=ids
+        ),
+        revoke_invitation=RevokeInvitation(invitations=invitations, audit_log=audit_log, ids=ids),
+    )
+
+
+async def resolve_workspace_scope(
+    conn: asyncpg.Connection,
+    workspace_id: UUID,
+    user_id: UUID,
+    *,
+    clock: ClockPort,
+    ids: IdPort,
+) -> WorkspaceScope | None:
+    """Looks up the caller's membership under ``conn`` (which must already
+    have ``app.tenant_id`` set to ``workspace_id`` — see
+    http/deps.py's get_workspace_scope) and builds the scope if found.
+    None means "no membership row visible" — the caller is responsible
+    for turning that into the same 404 used for "workspace doesn't
+    exist" (§3.7.1: no existence oracle for cross-tenant probes)."""
+    memberships = PostgresMembershipRepository(conn)
+    caller_membership = await memberships.get(workspace_id, user_id)
+    if caller_membership is None:
+        return None
+    return build_workspace_scope(conn, caller_membership, clock=clock, ids=ids)
+
+
+def build_create_workspace_use_case(conn: asyncpg.Connection, *, ids: IdPort) -> CreateWorkspace:
+    """CreateWorkspace is the one workspace-mutation with no existing
+    tenant to scope a connection to beforehand — see
+    http/deps.py's get_new_workspace_connection."""
+    workspaces = PostgresWorkspaceRepository(conn)
+    memberships = PostgresMembershipRepository(conn)
+    audit_log = PostgresAuditLog(conn)
+    return CreateWorkspace(
+        workspaces=workspaces, memberships=memberships, audit_log=audit_log, ids=ids
+    )
+
+
+def build_accept_invitation_use_case(
+    conn: asyncpg.Connection, *, clock: ClockPort, ids: IdPort
+) -> AcceptInvitation:
+    """Built on a connection already scoped to the invitation's discovered
+    workspace_id — see http/deps.py's get_invitation_acceptance_scope."""
+    invitations = PostgresInvitationRepository(conn)
+    memberships = PostgresMembershipRepository(conn)
+    audit_log = PostgresAuditLog(conn)
+    return AcceptInvitation(
+        invitations=invitations, memberships=memberships, audit_log=audit_log, clock=clock, ids=ids
+    )
+
+
 async def build_container(settings: Settings) -> Container:
     db_pool = await create_pool(settings.database_url)
     redis_client = redis_asyncio.from_url(  # type: ignore[no-untyped-call]  # redis-py gap, not ours
@@ -65,6 +199,7 @@ async def build_container(settings: Settings) -> Container:
 
     users = PostgresUserRepository(db_pool)
     refresh_tokens = PostgresRefreshTokenRepository(db_pool)
+    invitations = PostgresInvitationRepository(db_pool)
     hasher = Argon2PasswordHasher()
     tokens = EdDSATokenSigner(
         signing_key_b64=settings.jwt_signing_key,
@@ -80,6 +215,7 @@ async def build_container(settings: Settings) -> Container:
         redis_client=redis_client,
         users=users,
         refresh_tokens=refresh_tokens,
+        invitations=invitations,
         hasher=hasher,
         tokens=tokens,
         clock=clock,

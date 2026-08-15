@@ -20,6 +20,8 @@ import redis.asyncio as redis_asyncio
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
+from aether.adapters.postgres.pool import _init_connection
+
 API_DIR = Path(__file__).resolve().parents[2]
 
 PG_IMAGE = (
@@ -59,7 +61,7 @@ async def db_pool(postgres_url: str) -> AsyncIterator[asyncpg.Pool]:
     grant (it doesn't need one in production), so cleanup between tests is
     done by db_bootstrap_pool's teardown instead, not this fixture's."""
     app_api_url = _as_role(postgres_url, "app_api", "app-api-dev-only")
-    pool = await asyncpg.create_pool(app_api_url, min_size=1, max_size=4)
+    pool = await asyncpg.create_pool(app_api_url, min_size=1, max_size=4, init=_init_connection)
     try:
         yield pool
     finally:
@@ -71,13 +73,16 @@ async def db_bootstrap_pool(postgres_url: str) -> AsyncIterator[asyncpg.Pool]:
     """A pool connected as the bootstrap (superuser-ish) role — used to seed
     or verify fixture data by bypassing RLS, and to truncate between tests
     (app_api has no TRUNCATE grant, matching its production privileges)."""
-    pool = await asyncpg.create_pool(postgres_url, min_size=1, max_size=2)
+    pool = await asyncpg.create_pool(postgres_url, min_size=1, max_size=2, init=_init_connection)
     try:
         yield pool
     finally:
         async with pool.acquire() as conn:
+            # TRUNCATE on a partitioned table (audit_events) cascades to
+            # all its partitions automatically — no need to list them.
             await conn.execute(
-                "TRUNCATE memberships, workspaces, users, refresh_tokens RESTART IDENTITY CASCADE"
+                "TRUNCATE memberships, invitations, audit_events, workspaces, users, "
+                "refresh_tokens RESTART IDENTITY CASCADE"
             )
         await pool.close()
 
