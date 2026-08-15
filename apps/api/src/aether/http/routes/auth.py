@@ -12,6 +12,8 @@ from aether.app.auth.login_user import LoginUserCommand
 from aether.app.auth.logout_user import LogoutUserCommand
 from aether.app.auth.refresh_session import RefreshSessionCommand
 from aether.app.auth.register_user import RegisterUserCommand
+from aether.app.password_reset.request_password_reset import RequestPasswordResetCommand
+from aether.app.password_reset.reset_password import ResetPasswordCommand
 from aether.domain.errors import InvalidRefreshTokenError
 from aether.http.authz import AuthRequirement, route_auth
 from aether.http.composition import Container
@@ -22,10 +24,13 @@ from aether.http.deps import (
     get_container,
     get_current_session,
 )
+from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_ip, rate_limit_by_user
 from aether.http.schemas.auth import (
     AccessTokenResponse,
+    ConfirmPasswordResetRequest,
     LoginRequest,
     RegisterRequest,
+    RequestPasswordResetRequest,
     UserResponse,
 )
 
@@ -37,6 +42,7 @@ router = APIRouter(prefix="/v1/auth", tags=["auth"])
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     openapi_extra=route_auth(AuthRequirement.PUBLIC),
+    dependencies=[Depends(rate_limit_by_ip(RateLimitClass.AUTH))],
 )
 async def register(
     body: RegisterRequest, container: Container = Depends(get_container)
@@ -50,7 +56,10 @@ async def register(
 
 
 @router.post(
-    "/login", response_model=AccessTokenResponse, openapi_extra=route_auth(AuthRequirement.PUBLIC)
+    "/login",
+    response_model=AccessTokenResponse,
+    openapi_extra=route_auth(AuthRequirement.PUBLIC),
+    dependencies=[Depends(rate_limit_by_ip(RateLimitClass.AUTH))],
 )
 async def login(
     body: LoginRequest,
@@ -68,7 +77,10 @@ async def login(
 
 
 @router.post(
-    "/refresh", response_model=AccessTokenResponse, openapi_extra=route_auth(AuthRequirement.PUBLIC)
+    "/refresh",
+    response_model=AccessTokenResponse,
+    openapi_extra=route_auth(AuthRequirement.PUBLIC),
+    dependencies=[Depends(rate_limit_by_ip(RateLimitClass.AUTH))],
 )
 async def refresh(
     response: Response,
@@ -93,6 +105,7 @@ async def refresh(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
     openapi_extra=route_auth(AuthRequirement.AUTHENTICATED),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.AUTH))],
 )
 async def logout(
     response: Response,
@@ -102,9 +115,39 @@ async def logout(
 ) -> None:
     await container.logout_user.execute(
         LogoutUserCommand(
+            user_id=session.user_id,
             jti=session.jti,
             access_token_expires_at=session.expires_at,
             raw_refresh_token=refresh_token,
         )
     )
     clear_refresh_cookie(response)
+
+
+@router.post(
+    "/password-reset:request",
+    status_code=status.HTTP_202_ACCEPTED,
+    openapi_extra=route_auth(AuthRequirement.PUBLIC),
+    dependencies=[Depends(rate_limit_by_ip(RateLimitClass.AUTH))],
+)
+async def request_password_reset(
+    body: RequestPasswordResetRequest, container: Container = Depends(get_container)
+) -> None:
+    # 202 unconditionally — RequestPasswordReset itself is what makes
+    # this enumeration-safe (a no-op for an unknown/OAuth-only email);
+    # the route never learns, let alone reports, which branch it took.
+    await container.request_password_reset.execute(RequestPasswordResetCommand(email=body.email))
+
+
+@router.post(
+    "/password-reset:confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+    openapi_extra=route_auth(AuthRequirement.PUBLIC),
+    dependencies=[Depends(rate_limit_by_ip(RateLimitClass.AUTH))],
+)
+async def confirm_password_reset(
+    body: ConfirmPasswordResetRequest, container: Container = Depends(get_container)
+) -> None:
+    await container.reset_password.execute(
+        ResetPasswordCommand(raw_token=body.token, new_password=body.new_password)
+    )

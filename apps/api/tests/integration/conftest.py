@@ -15,10 +15,15 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import asyncpg
+import httpx
 import pytest
 import redis.asyncio as redis_asyncio
+from testcontainers.core.container import DockerContainer
+from testcontainers.core.waiting_utils import wait_for_logs
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
+
+from aether.adapters.postgres.pool import _init_connection
 
 API_DIR = Path(__file__).resolve().parents[2]
 
@@ -27,6 +32,10 @@ PG_IMAGE = (
 )
 REDIS_IMAGE = (
     "redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2"
+)
+# Same digest as infra/compose/compose.yml's mailpit service.
+MAILPIT_IMAGE = (
+    "axllent/mailpit:v1.20@sha256:7eef0f38dbc85e4e264f2edf5d70fbb694826791e05cb2cae4fc9e3282f968f5"
 )
 
 
@@ -59,7 +68,7 @@ async def db_pool(postgres_url: str) -> AsyncIterator[asyncpg.Pool]:
     grant (it doesn't need one in production), so cleanup between tests is
     done by db_bootstrap_pool's teardown instead, not this fixture's."""
     app_api_url = _as_role(postgres_url, "app_api", "app-api-dev-only")
-    pool = await asyncpg.create_pool(app_api_url, min_size=1, max_size=4)
+    pool = await asyncpg.create_pool(app_api_url, min_size=1, max_size=4, init=_init_connection)
     try:
         yield pool
     finally:
@@ -71,15 +80,38 @@ async def db_bootstrap_pool(postgres_url: str) -> AsyncIterator[asyncpg.Pool]:
     """A pool connected as the bootstrap (superuser-ish) role — used to seed
     or verify fixture data by bypassing RLS, and to truncate between tests
     (app_api has no TRUNCATE grant, matching its production privileges)."""
-    pool = await asyncpg.create_pool(postgres_url, min_size=1, max_size=2)
+    pool = await asyncpg.create_pool(postgres_url, min_size=1, max_size=2, init=_init_connection)
     try:
         yield pool
     finally:
         async with pool.acquire() as conn:
+            # TRUNCATE on a partitioned table (audit_events) cascades to
+            # all its partitions automatically — no need to list them.
             await conn.execute(
-                "TRUNCATE memberships, workspaces, users, refresh_tokens RESTART IDENTITY CASCADE"
+                "TRUNCATE memberships, invitations, audit_events, outbox, "
+                "password_reset_tokens, workspaces, users, refresh_tokens RESTART IDENTITY CASCADE"
             )
         await pool.close()
+
+
+@pytest.fixture(scope="session")
+def mailpit() -> Iterator[tuple[str, int, str]]:
+    """Real mailpit — SMTP intake + HTTP API to assert on received mail.
+    Yields (smtp_host, smtp_port, http_base_url)."""
+    with DockerContainer(MAILPIT_IMAGE).with_exposed_ports(1025, 8025) as container:
+        wait_for_logs(container, "accessible via", timeout=15)
+        host = container.get_container_host_ip()
+        smtp_port = int(container.get_exposed_port(1025))
+        http_port = int(container.get_exposed_port(8025))
+        yield host, smtp_port, f"http://{host}:{http_port}"
+
+
+@pytest.fixture()
+def mailpit_client(mailpit: tuple[str, int, str]) -> Iterator[httpx.Client]:
+    _, _, base_url = mailpit
+    with httpx.Client(base_url=base_url, timeout=5.0) as client:
+        client.delete("/api/v1/messages")  # start each test with an empty mailbox
+        yield client
 
 
 @pytest.fixture()

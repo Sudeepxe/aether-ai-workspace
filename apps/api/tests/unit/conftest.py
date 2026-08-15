@@ -26,6 +26,8 @@ from tests.unit.fakes.auth import (
     FakeTokenPort,
     FakeUserRepository,
 )
+from tests.unit.fakes.rate_limit import FakeRateLimiter
+from tests.unit.fakes.workspaces import FakeAuditLog
 
 _REFRESH_TTL = 604_800
 _GRACE = 30
@@ -44,6 +46,8 @@ class FakeContainer:
         hasher = FakePasswordHasher()
         tokens = FakeTokenPort(clock=clock)
         revocations = FakeRevocationPort()
+        audit_log = FakeAuditLog()
+        rate_limiter = FakeRateLimiter()
 
         self.users = users
         self.refresh_tokens = refresh_tokens
@@ -52,9 +56,11 @@ class FakeContainer:
         self.clock = clock
         self.ids = ids
         self.revocations = revocations
+        self.audit_log = audit_log
+        self.rate_limiter = rate_limiter
         self.refresh_ttl_seconds = _REFRESH_TTL
 
-        self.register_user = RegisterUser(users=users, hasher=hasher, ids=ids)
+        self.register_user = RegisterUser(users=users, hasher=hasher, audit_log=audit_log, ids=ids)
         self.login_user = LoginUser(
             users=users,
             refresh_tokens=refresh_tokens,
@@ -62,6 +68,7 @@ class FakeContainer:
             tokens=tokens,
             clock=clock,
             ids=ids,
+            audit_log=audit_log,
             refresh_ttl_seconds=_REFRESH_TTL,
         )
         self.refresh_session = RefreshSession(
@@ -73,7 +80,11 @@ class FakeContainer:
             grace_seconds=_GRACE,
         )
         self.logout_user = LogoutUser(
-            refresh_tokens=refresh_tokens, revocations=revocations, clock=clock
+            refresh_tokens=refresh_tokens,
+            revocations=revocations,
+            clock=clock,
+            audit_log=audit_log,
+            ids=ids,
         )
         self.revoke_user_sessions = RevokeUserSessions(refresh_tokens=refresh_tokens, clock=clock)
 

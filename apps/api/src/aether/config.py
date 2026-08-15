@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # S11 concern) — see migrations/env.py.
     database_url: str = "postgresql://app_api:app-api-dev-only@localhost:5432/aether"
     database_migrator_url: str = "postgresql://aether:aether-dev-only@localhost:5432/aether"
+    # The worker process (Sprint 2: outbox dispatch) connects as the
+    # separate, least-privileged app_worker role — its grants (outbox
+    # SELECT/UPDATE) are disjoint from app_api's, matching ADR-8.1's
+    # three-role model.
+    database_worker_url: str = "postgresql://app_worker:app-worker-dev-only@localhost:5432/aether"
     redis_url: str = "redis://localhost:6379/0"
 
     # --- auth / JWT (Sprint 1, ADR-7.2) ---------------------------------
@@ -45,6 +50,17 @@ class Settings(BaseSettings):
     jwt_access_ttl_seconds: int = 900
     jwt_refresh_ttl_seconds: int = 604_800
     jwt_refresh_grace_seconds: int = 30
+
+    # --- email (Sprint 2, ADR-11.1) --------------------------------------
+    # dev profile: SMTP against mailpit (already in the dev compose
+    # stack). "resend" swaps in the managed-API adapter for prod-like
+    # profiles — resend_api_key comes from the SOPS bundle there, never
+    # a committed default (empty string is not a usable key).
+    email_provider: Literal["smtp", "resend"] = "smtp"
+    smtp_host: str = "localhost"
+    smtp_port: int = 1025
+    email_sender: str = "noreply@aether.local"
+    resend_api_key: str = ""
 
 
 @lru_cache(maxsize=1)

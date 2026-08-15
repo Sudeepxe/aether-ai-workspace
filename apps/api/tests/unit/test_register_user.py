@@ -5,13 +5,22 @@ import pytest
 from aether.app.auth.register_user import RegisterUser, RegisterUserCommand
 from aether.domain.errors import EmailAlreadyRegisteredError
 from tests.unit.fakes.auth import FakeIdGenerator, FakePasswordHasher, FakeUserRepository
+from tests.unit.fakes.workspaces import FakeAuditLog
 
 pytestmark = pytest.mark.unit
 
 
 def _use_case() -> tuple[RegisterUser, FakeUserRepository]:
     users = FakeUserRepository()
-    return RegisterUser(users=users, hasher=FakePasswordHasher(), ids=FakeIdGenerator()), users
+    return (
+        RegisterUser(
+            users=users,
+            hasher=FakePasswordHasher(),
+            audit_log=FakeAuditLog(),
+            ids=FakeIdGenerator(),
+        ),
+        users,
+    )
 
 
 async def test_register_creates_user_with_hashed_password() -> None:

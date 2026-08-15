@@ -47,13 +47,29 @@ from aether.http.authz import (
 
 pytestmark = pytest.mark.security
 
-# path, method -> expected declared requirement (Sprint 1's full route set).
+# path, method -> expected declared requirement (Sprint 1 + Sprint 2's
+# full route set so far).
 _EXPECTED_ROUTE_AUTH: dict[tuple[str, str], AuthRequirement] = {
     ("/v1/auth/register", "POST"): AuthRequirement.PUBLIC,
     ("/v1/auth/login", "POST"): AuthRequirement.PUBLIC,
     ("/v1/auth/refresh", "POST"): AuthRequirement.PUBLIC,
     ("/v1/auth/logout", "POST"): AuthRequirement.AUTHENTICATED,
+    ("/v1/auth/password-reset:request", "POST"): AuthRequirement.PUBLIC,
+    ("/v1/auth/password-reset:confirm", "POST"): AuthRequirement.PUBLIC,
     ("/v1/me", "GET"): AuthRequirement.AUTHENTICATED,
+    ("/v1/workspaces", "POST"): AuthRequirement.AUTHENTICATED,
+    ("/v1/workspaces/{workspace_id}", "GET"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}", "PATCH"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}", "DELETE"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/members", "GET"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/members/{user_id}", "PATCH"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/members/{user_id}", "DELETE"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/invitations", "POST"): AuthRequirement.WORKSPACE_MEMBER,
+    (
+        "/v1/workspaces/{workspace_id}/invitations/{invitation_id}",
+        "DELETE",
+    ): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/invitations/{token}:accept", "POST"): AuthRequirement.AUTHENTICATED,
 }
 
 

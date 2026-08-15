@@ -13,6 +13,7 @@ from tests.unit.fakes.auth import (
     FakeRefreshTokenRepository,
     FakeRevocationPort,
 )
+from tests.unit.fakes.workspaces import FakeAuditLog
 
 pytestmark = pytest.mark.unit
 
@@ -35,10 +36,17 @@ async def test_logout_denies_jti_and_revokes_refresh_family() -> None:
         expires_at=_START + timedelta(days=7),
     )
 
-    use_case = LogoutUser(refresh_tokens=refresh_tokens, revocations=revocations, clock=clock)
+    use_case = LogoutUser(
+        refresh_tokens=refresh_tokens,
+        revocations=revocations,
+        clock=clock,
+        audit_log=FakeAuditLog(),
+        ids=ids,
+    )
     jti = ids.new_id()
     await use_case.execute(
         LogoutUserCommand(
+            user_id=user_id,
             jti=jti,
             access_token_expires_at=_START + timedelta(minutes=15),
             raw_refresh_token="raw-token-1",

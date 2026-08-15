@@ -25,3 +25,12 @@ class LoginRequest(BaseModel):
 class AccessTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"  # noqa: S105 — the RFC 6749 token_type value, not a credential
+
+
+class RequestPasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class ConfirmPasswordResetRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=512)
+    new_password: str = Field(min_length=8, max_length=256)

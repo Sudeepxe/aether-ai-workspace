@@ -15,6 +15,7 @@ from uuid import UUID
 
 from aether.app.auth.tokens import hash_refresh_token
 from aether.domain.errors import AuthenticationFailedError
+from aether.ports.audit import AuditLogPort
 from aether.ports.repositories import RefreshTokenRepositoryPort, UserRepositoryPort
 from aether.ports.security import ClockPort, IdPort, PasswordHasherPort, TokenPort
 
@@ -45,6 +46,7 @@ class LoginUser:
         tokens: TokenPort,
         clock: ClockPort,
         ids: IdPort,
+        audit_log: AuditLogPort,
         refresh_ttl_seconds: int,
     ) -> None:
         self._users = users
@@ -53,6 +55,7 @@ class LoginUser:
         self._tokens = tokens
         self._clock = clock
         self._ids = ids
+        self._audit_log = audit_log
         self._refresh_ttl_seconds = refresh_ttl_seconds
         # Computed once (not per request) so the dummy-verify path has a
         # real hash to check against for timing parity (see module docstring).
@@ -78,6 +81,21 @@ class LoginUser:
             token_hash=hash_refresh_token(raw_refresh_token),
             device_fingerprint=command.device_fingerprint,
             expires_at=now + timedelta(seconds=self._refresh_ttl_seconds),
+        )
+        # Only successful logins are audited here — failed attempts are a
+        # monitoring/metrics concern (§7.6: "login failure spikes"), not
+        # an audit-log entry; logging them would let a brute-force
+        # attacker flood an immutable, INSERT-only table they can't clean
+        # up, and there's no state change here for an audit trail to record.
+        await self._audit_log.record(
+            id=self._ids.new_id(),
+            workspace_id=None,
+            actor_user_id=user.id,
+            actor_key_id=None,
+            action="auth.login_succeeded",
+            target_type="user",
+            target_id=user.id,
+            metadata={},
         )
 
         return LoginResult(

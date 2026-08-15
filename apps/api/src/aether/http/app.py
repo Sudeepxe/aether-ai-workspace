@@ -1,11 +1,10 @@
 """FastAPI application factory — composition root (Blueprint §3.9.1).
 
-Sprint 0 shipped liveness/readiness only. Sprint 1 adds the auth module
-(register/login/refresh/logout/me) and the machinery around it: a
-lifespan-scoped Container (DB pool + Redis client + wired use cases,
-composition.py), Problem-JSON-*shaped* (not yet the full RFC 9457
-envelope — that's S2) error mapping for domain errors, and the
-deny-by-default route-registration check (ADR-4.5) run at the end of
+Sprint 0 shipped liveness/readiness only. Sprint 1 added the auth module
+and a Problem-JSON-*shaped* (not yet the full RFC 9457 envelope) error
+mapping for domain errors. Sprint 2 (problem_json.py) completes that
+into the actual RFC 9457 envelope on every non-2xx response, and adds
+the deny-by-default route-registration check (ADR-4.5) run at the end of
 ``create_app()`` so a route with no declared auth requirement is a boot
 failure, not a runtime surprise.
 """
@@ -18,7 +17,6 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse
 
 from aether.config import get_settings
 from aether.domain.errors import (
@@ -26,14 +24,23 @@ from aether.domain.errors import (
     DomainError,
     EmailAlreadyRegisteredError,
     InvalidAccessTokenError,
+    InvalidInvitationError,
+    InvalidPasswordResetTokenError,
     InvalidRefreshTokenError,
+    LastOwnerProtectionError,
+    MembershipNotFoundError,
     RefreshTokenReusedError,
     UserNotFoundError,
+    WorkspaceConcurrencyConflictError,
+    WorkspaceNotFoundError,
 )
 from aether.http.authz import assert_all_routes_declare_auth
 from aether.http.composition import build_container
+from aether.http.problem_json import install_error_handlers
 from aether.http.routes.auth import router as auth_router
+from aether.http.routes.invitations import router as invitations_router
 from aether.http.routes.me import router as me_router
+from aether.http.routes.workspaces import router as workspaces_router
 from aether.logging import configure_logging, get_logger
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -47,6 +54,15 @@ _ERROR_STATUS: dict[type[DomainError], int] = {
     RefreshTokenReusedError: 401,
     InvalidAccessTokenError: 401,
     UserNotFoundError: 404,
+    WorkspaceNotFoundError: 404,
+    MembershipNotFoundError: 404,
+    LastOwnerProtectionError: 409,
+    WorkspaceConcurrencyConflictError: 409,
+    # One status for all three "unusable token" cases (unknown/expired/
+    # consumed), matching the one-error-type enumeration-safety posture
+    # already used for AuthenticationFailedError.
+    InvalidInvitationError: 404,
+    InvalidPasswordResetTokenError: 404,
 }
 
 
@@ -86,12 +102,31 @@ def create_app() -> FastAPI:
         Honors an inbound X-Request-ID (edge-injected, §3.2.1) or mints one.
         """
         request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        # Set explicitly on request.state (not just structlog's context)
+        # so Problem+JSON error handlers can read it directly — relying
+        # on structlog's contextvars propagation across the exception-
+        # handling boundary is exactly the kind of implicit coupling that
+        # breaks silently when middleware ordering changes.
+        request.state.request_id = request_id
         structlog.contextvars.bind_contextvars(correlation_id=request_id)
         try:
             response = await call_next(request)
         finally:
             structlog.contextvars.unbind_contextvars("correlation_id")
         response.headers[REQUEST_ID_HEADER] = request_id
+        # Applied here, not by the rate-limit dependency directly: a
+        # Response object mutated inside a dependency is discarded
+        # whenever anything downstream raises (the dependency's own 429,
+        # or an ordinary domain error from the route itself), so headers
+        # must be merged onto whatever response actually goes out —
+        # after call_next(), which sits outside exception handling.
+        rate_limit = getattr(request.state, "rate_limit", None)
+        if rate_limit is not None:
+            response.headers["RateLimit-Limit"] = str(rate_limit.limit)
+            response.headers["RateLimit-Remaining"] = str(rate_limit.remaining)
+            response.headers["RateLimit-Reset"] = str(rate_limit.reset_seconds)
+            if not rate_limit.allowed:
+                response.headers["Retry-After"] = str(rate_limit.reset_seconds)
         return response
 
     @app.get("/healthz", tags=["ops"], include_in_schema=False)
@@ -118,22 +153,10 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(me_router)
+    app.include_router(workspaces_router)
+    app.include_router(invitations_router)
 
-    for error_type, status_code in _ERROR_STATUS.items():
-
-        def _make_handler(code: int) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:
-            # Registered per-exception-type below, so Starlette only ever
-            # invokes this for that type (or a subclass) despite the
-            # necessarily-wider `Exception` signature add_exception_handler
-            # requires.
-            async def _handler(request: Request, exc: Exception) -> JSONResponse:
-                return JSONResponse(
-                    status_code=code, content={"detail": str(exc) or exc.__class__.__name__}
-                )
-
-            return _handler
-
-        app.add_exception_handler(error_type, _make_handler(status_code))
+    install_error_handlers(app, error_status=_ERROR_STATUS)
 
     assert_all_routes_declare_auth(app)  # ADR-4.5 — a boot failure, not a test-only check
 

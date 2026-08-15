@@ -10,13 +10,17 @@ from aether.domain.errors import UserNotFoundError
 from aether.http.authz import AuthRequirement, route_auth
 from aether.http.composition import Container
 from aether.http.deps import AuthenticatedSession, get_container, get_current_session
+from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
 from aether.http.schemas.auth import UserResponse
 
 router = APIRouter(prefix="/v1", tags=["me"])
 
 
 @router.get(
-    "/me", response_model=UserResponse, openapi_extra=route_auth(AuthRequirement.AUTHENTICATED)
+    "/me",
+    response_model=UserResponse,
+    openapi_extra=route_auth(AuthRequirement.AUTHENTICATED),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
 )
 async def get_me(
     container: Container = Depends(get_container),

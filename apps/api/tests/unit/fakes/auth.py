@@ -93,6 +93,20 @@ class FakeUserRepository:
     async def get_by_email(self, email: str) -> User | None:
         return self._by_email.get(email)
 
+    async def update_password_hash(self, user_id: UUID, *, password_hash: str) -> None:
+        current = self._by_id[user_id]
+        updated = User(
+            id=current.id,
+            email=current.email,
+            display_name=current.display_name,
+            password_hash=password_hash,
+            status=current.status,
+            created_at=current.created_at,
+            updated_at=current.updated_at,
+        )
+        self._by_id[user_id] = updated
+        self._by_email[current.email] = updated
+
 
 @dataclass
 class FakeRefreshTokenRepository:
