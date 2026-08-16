@@ -57,6 +57,29 @@ services:
       timeout: 3s
       retries: 5
 
+  clamav:
+    # No arm64 build published upstream — explicit platform pin so this
+    # runs (emulated) on Apple Silicon dev machines too, not just
+    # native-amd64 CI/prod hosts.
+    image: clamav/clamav@sha256:7173cd3d57a839c6fee673b07246301e0d1f68f5a14a5ca063f502323bf1cc61
+    platform: linux/amd64
+    profiles: ["dev"]
+    environment:
+      # Dev/demo posture: skip the live signature-update check on every
+      # boot (network-dependent, ~30-50s) — the image's baked-in
+      # database is enough for EICAR-level detection in local dev.
+      CLAMAV_NO_FRESHCLAMD: "true"
+    ports: ["3310:3310"]
+    healthcheck:
+      # clamd's own startup is what's slow (loading the signature DB
+      # into memory), not this check itself — the long start_period
+      # accommodates that instead of the interval/retries doing so.
+      test: ["CMD-SHELL", "echo PING | nc -w 2 localhost 3310 | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
   api:
     profiles: ["app"]
     build:
@@ -95,10 +118,21 @@ services:
       AETHER_EMAIL_PROVIDER: smtp
       AETHER_SMTP_HOST: mailpit
       AETHER_SMTP_PORT: "1025"
+      # Object storage + malware scan (Sprint 5, issue #46) — the
+      # ingestion consumer this process runs needs both to reach the
+      # real minio/clamav services by their compose hostnames, not the
+      # config module's localhost dev defaults.
+      AETHER_OBJECT_STORAGE_ENDPOINT: minio:9000
+      AETHER_OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-aether}
+      AETHER_OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-aether-dev-only}
+      AETHER_CLAMAV_HOST: clamav
+      AETHER_CLAMAV_PORT: "3310"
     depends_on:
       postgres: { condition: service_healthy }
       mailpit: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      clamav: { condition: service_healthy }
 
 volumes:
   pg_data:

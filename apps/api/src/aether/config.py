@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     object_storage_bucket: str = "aether-documents"
     object_storage_presign_ttl_seconds: int = 900  # 15 min, ADR-3.8
 
+    # --- Malware scanning (Sprint 5, §3.2.7, TB-6) -----------------------
+    clamav_host: str = "localhost"
+    clamav_port: int = 3310
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

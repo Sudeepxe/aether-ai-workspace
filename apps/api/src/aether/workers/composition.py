@@ -11,19 +11,26 @@ from dataclasses import dataclass
 import asyncpg
 import redis.asyncio as redis_asyncio
 
+from aether.adapters.clamav.scanner import ClamAvScanner
 from aether.adapters.clock import SystemClock
 from aether.adapters.email.resend import ResendEmailAdapter
 from aether.adapters.email.smtp import SmtpEmailAdapter
+from aether.adapters.minio.object_storage import MinioObjectStorage
+from aether.adapters.postgres.ingestion_repository import PostgresIngestionRepository
 from aether.adapters.postgres.outbox_repository import PostgresOutboxRepository
 from aether.adapters.postgres.pool import create_pool
 from aether.adapters.redis.ingestion_queue import RedisIngestionQueue
 from aether.app.ingestion.dispatch_outbox_to_queue import DispatchIngestionOutbox
+from aether.app.ingestion.process_document import DocumentProcessor
 from aether.app.notifications.dispatch_email_outbox import DispatchEmailOutbox
 from aether.config import Settings
 from aether.ports.email import EmailPort
 from aether.ports.ingestion_queue import IngestionQueuePort
+from aether.ports.ingestion_repository import IngestionRepositoryPort
+from aether.ports.malware_scan import MalwareScanPort
 from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.security import ClockPort
+from aether.ports.storage import ObjectStoragePort
 
 
 @dataclass
@@ -34,13 +41,15 @@ class WorkerContainer:
     email: EmailPort
     clock: ClockPort
     ingestion_queue: IngestionQueuePort
-    """The consumer loop itself (claim -> process -> ack/fail) isn't run
-    by this worker yet — there's no real document-processing handler
-    until issue #46 lands. This container only wires the outbox->queue
-    dispatcher, which is real, self-contained infrastructure regardless
-    of whether anything downstream consumes from the queue yet."""
+    object_storage: ObjectStoragePort
+    scanner: MalwareScanPort
+    ingestion_repository: IngestionRepositoryPort
     dispatch_email_outbox: DispatchEmailOutbox
     dispatch_ingestion_outbox: DispatchIngestionOutbox
+    process_document: DocumentProcessor
+    """The real ingestion-pipeline handler (issue #46), passed to
+    app.ingestion.consume_queue.run_ingestion_consumer by workers/main.py
+    to actually start consuming — this container only builds it."""
 
     async def aclose(self) -> None:
         await self.db_pool.close()
@@ -70,6 +79,15 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
     ingestion_queue = RedisIngestionQueue(
         redis_client, consumer_name=f"worker-{uuid.uuid4().hex[:8]}"
     )
+    object_storage = MinioObjectStorage(
+        endpoint=settings.object_storage_endpoint,
+        access_key=settings.object_storage_access_key,
+        secret_key=settings.object_storage_secret_key,
+        secure=settings.object_storage_secure,
+        bucket=settings.object_storage_bucket,
+    )
+    scanner = ClamAvScanner(host=settings.clamav_host, port=settings.clamav_port)
+    ingestion_repository = PostgresIngestionRepository(db_pool)
 
     return WorkerContainer(
         db_pool=db_pool,
@@ -78,8 +96,14 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
         email=email,
         clock=clock,
         ingestion_queue=ingestion_queue,
+        object_storage=object_storage,
+        scanner=scanner,
+        ingestion_repository=ingestion_repository,
         dispatch_email_outbox=DispatchEmailOutbox(outbox=outbox, email=email, clock=clock),
         dispatch_ingestion_outbox=DispatchIngestionOutbox(
             outbox=outbox, queue=ingestion_queue, clock=clock
+        ),
+        process_document=DocumentProcessor(
+            object_storage=object_storage, scanner=scanner, repository=ingestion_repository
         ),
     )

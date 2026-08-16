@@ -304,3 +304,22 @@ class Chunk:
     embedding_model: str | None
     embedding_version: int | None
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkDraft:
+    """The structure-aware chunker's own output shape (ADR-6.2,
+    app/ingestion/chunking.py) — deliberately distinct from ``Chunk``
+    above (the full persisted-row shape). A draft carries everything
+    the *algorithm* produces; it has no identity yet (no id,
+    workspace_id, document_id, content_sha256) — those are persistence
+    concerns the repository adapter assigns on insert, not something
+    the pure chunking function should need to know about."""
+
+    content: str
+    section_path: str
+    page_start: int | None
+    page_end: int | None
+    char_start: int
+    char_end: int
+    token_count: int
