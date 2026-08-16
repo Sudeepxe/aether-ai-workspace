@@ -128,3 +128,28 @@ async def test_workspace_id_and_query_are_passed_through_to_both_legs() -> None:
     assert chunk_search.vector_calls[0][0] == workspace_id
     assert chunk_search.lexical_calls[0][0] == workspace_id
     assert chunk_search.lexical_calls[0][1] == "hello world"
+
+
+async def test_dual_feed_searches_the_lexical_leg_once_per_query_but_the_vector_leg_only_once() -> (
+    None
+):
+    """Issue #57's dual-feed contract as HybridSearch sees it: the
+    caller passes both the raw and rewritten queries as
+    ``lexical_queries``, but only ``query`` (the rewritten one) drives
+    the single vector-leg call."""
+    chunk_search = FakeChunkSearch()
+    search = HybridSearch(chunk_search=chunk_search, embedder=FakeQueryEmbedder())
+
+    await search.search(
+        uuid4(),
+        query="What is Acme Corp's pricing?",
+        lexical_queries=["what about its pricing?", "What is Acme Corp's pricing?"],
+        k=6,
+    )
+
+    assert len(chunk_search.vector_calls) == 1
+    assert len(chunk_search.lexical_calls) == 2
+    assert [call[1] for call in chunk_search.lexical_calls] == [
+        "what about its pricing?",
+        "What is Acme Corp's pricing?",
+    ]
