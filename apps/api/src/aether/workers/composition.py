@@ -15,7 +15,9 @@ from aether.adapters.clamav.scanner import ClamAvScanner
 from aether.adapters.clock import SystemClock
 from aether.adapters.email.resend import ResendEmailAdapter
 from aether.adapters.email.smtp import SmtpEmailAdapter
+from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
+from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
 from aether.adapters.postgres.ingestion_repository import PostgresIngestionRepository
 from aether.adapters.postgres.outbox_repository import PostgresOutboxRepository
 from aether.adapters.postgres.pool import create_pool
@@ -25,6 +27,7 @@ from aether.app.ingestion.process_document import DocumentProcessor
 from aether.app.notifications.dispatch_email_outbox import DispatchEmailOutbox
 from aether.config import Settings
 from aether.ports.email import EmailPort
+from aether.ports.embedding import EmbeddingProviderPort
 from aether.ports.ingestion_queue import IngestionQueuePort
 from aether.ports.ingestion_repository import IngestionRepositoryPort
 from aether.ports.malware_scan import MalwareScanPort
@@ -44,6 +47,7 @@ class WorkerContainer:
     object_storage: ObjectStoragePort
     scanner: MalwareScanPort
     ingestion_repository: IngestionRepositoryPort
+    embedder: EmbeddingProviderPort
     dispatch_email_outbox: DispatchEmailOutbox
     dispatch_ingestion_outbox: DispatchIngestionOutbox
     process_document: DocumentProcessor
@@ -62,6 +66,17 @@ def _build_email_adapter(settings: Settings) -> EmailPort:
     return SmtpEmailAdapter(
         host=settings.smtp_host, port=settings.smtp_port, sender=settings.email_sender
     )
+
+
+def _build_embedder(settings: Settings) -> EmbeddingProviderPort:
+    """Real OpenAI embeddings only if configured (§3.2.4/§6.2's D6-3
+    pattern, mirroring http/composition.py's ``_build_generator``) —
+    dev/CI environments without a SOPS-decrypted API key fall back to
+    LocalHashEmbeddingAdapter, a real and honest (if non-semantic)
+    embedder, not a silent stub."""
+    if settings.openai_api_key:
+        return OpenAiEmbeddingAdapter(api_key=settings.openai_api_key)
+    return LocalHashEmbeddingAdapter()
 
 
 async def build_worker_container(settings: Settings) -> WorkerContainer:
@@ -88,6 +103,7 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
     )
     scanner = ClamAvScanner(host=settings.clamav_host, port=settings.clamav_port)
     ingestion_repository = PostgresIngestionRepository(db_pool)
+    embedder = _build_embedder(settings)
 
     return WorkerContainer(
         db_pool=db_pool,
@@ -99,11 +115,15 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
         object_storage=object_storage,
         scanner=scanner,
         ingestion_repository=ingestion_repository,
+        embedder=embedder,
         dispatch_email_outbox=DispatchEmailOutbox(outbox=outbox, email=email, clock=clock),
         dispatch_ingestion_outbox=DispatchIngestionOutbox(
             outbox=outbox, queue=ingestion_queue, clock=clock
         ),
         process_document=DocumentProcessor(
-            object_storage=object_storage, scanner=scanner, repository=ingestion_repository
+            object_storage=object_storage,
+            scanner=scanner,
+            repository=ingestion_repository,
+            embedder=embedder,
         ),
     )

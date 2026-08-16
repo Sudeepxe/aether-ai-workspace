@@ -6,6 +6,18 @@ transaction (so the outbox row commits or rolls back with the business
 mutation it accompanies); the worker's consumer side runs standalone
 against the pool, dispatching across every tenant by design (see the
 migration's docstring for why this table has no RLS).
+
+``enqueue_idempotent`` exists as a distinct method rather than folding
+``ON CONFLICT (id) DO NOTHING`` into ``enqueue`` itself: Postgres
+requires SELECT privilege (not just INSERT) to evaluate an ON CONFLICT
+arbiter, even for DO NOTHING — app_api's outbox grant is INSERT-only
+(password reset, invitations always pass a fresh id, so idempotency
+never mattered for them), and broadening it to SELECT just to support
+issue #47's worker-plane use case would violate least privilege for a
+role that has no reason to ever read outbox rows back. app_worker
+already has SELECT (the dispatcher's read side), so only its own
+document.ready/document.failed writes — the ones that genuinely need a
+deterministic, redelivery-safe id — use this method.
 """
 
 from __future__ import annotations
@@ -37,6 +49,30 @@ class PostgresOutboxRepository:
             """
             INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, tenant_id, payload)
             VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            id,
+            aggregate_type,
+            aggregate_id,
+            event_type,
+            tenant_id,
+            payload,
+        )
+
+    async def enqueue_idempotent(
+        self,
+        *,
+        id: UUID,
+        aggregate_type: str,
+        aggregate_id: UUID,
+        event_type: str,
+        tenant_id: UUID | None,
+        payload: dict[str, Any],
+    ) -> None:
+        await self._conn.execute(
+            """
+            INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, tenant_id, payload)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (id) DO NOTHING
             """,
             id,
             aggregate_type,
