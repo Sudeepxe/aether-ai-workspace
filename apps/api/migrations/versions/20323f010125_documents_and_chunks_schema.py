@@ -144,8 +144,7 @@ def upgrade() -> None:
     )
     op.execute("CREATE INDEX chunks_document_idx ON chunks (document_id)")
     op.execute(
-        "CREATE INDEX chunks_embedding_hnsw_idx ON chunks "
-        "USING hnsw (embedding vector_cosine_ops)"
+        "CREATE INDEX chunks_embedding_hnsw_idx ON chunks USING hnsw (embedding vector_cosine_ops)"
     )
     op.execute("CREATE INDEX chunks_content_tsv_gin_idx ON chunks USING gin (content_tsv)")
 
