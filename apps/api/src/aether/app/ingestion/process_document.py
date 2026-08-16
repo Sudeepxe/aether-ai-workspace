@@ -1,18 +1,20 @@
 """The real ingestion-pipeline handler (§3.2.7): fetch -> scan ->
-detect type -> parse -> chunk -> persist, passed as ``run_ingestion_
-consumer``'s handler (issue #45). Stops at CHUNKING -> EMBEDDING;
-issue #47 owns the embedding call itself and the final EMBEDDING ->
-READY transition.
+detect type -> parse -> chunk -> embed -> persist, passed as
+``run_ingestion_consumer``'s handler (issue #45).
 
 Failure handling follows one rule: a *permanent* failure (the content
-itself is malicious, unparseable, or an unsupported type — retrying
-would fail identically every time) is caught here and written straight
-to the document's failed status, then the handler returns normally so
-the queue acks it — no point burning through issue #45's bounded
-retries on something that can never succeed. Anything else (storage
-unreachable, scanner connection refused, an unexpected bug) is left to
-propagate, so the queue's own retry-then-DLQ mechanism handles it —
-those might genuinely succeed on a later attempt.
+itself is malicious, unparseable, an unsupported type, or an embedding
+call that fails for a non-retryable reason — retrying would fail
+identically every time) is caught here and written straight to the
+document's failed status, then the handler returns normally so the
+queue acks it — no point burning through issue #45's bounded retries on
+something that can never succeed. Anything else (storage unreachable,
+scanner connection refused, embedding quota exhaustion, an unexpected
+bug) is left to propagate, so the queue's own retry-then-DLQ mechanism
+handles it — issue #45's per-tenant fair queuing already means one
+tenant's throttled retries can't starve another's pending work, so no
+separate backoff mechanism is needed here (§3.2.7's failure-scenario
+note).
 
 The ``document.uploaded`` payload contract this handler expects (issue
 #48, not yet built, must produce events matching this shape):
@@ -36,7 +38,8 @@ from aether.app.ingestion.type_detection import (
     UnsupportedDocumentTypeError,
     detect_document_type,
 )
-from aether.domain.entities import DocumentStatus
+from aether.domain.entities import Chunk, DocumentStatus
+from aether.ports.embedding import EmbeddingProviderError, EmbeddingProviderPort
 from aether.ports.ingestion_queue import QueuedMessage
 from aether.ports.ingestion_repository import IngestionRepositoryPort
 from aether.ports.malware_scan import MalwareScanPort
@@ -67,10 +70,12 @@ class DocumentProcessor:
         object_storage: ObjectStoragePort,
         scanner: MalwareScanPort,
         repository: IngestionRepositoryPort,
+        embedder: EmbeddingProviderPort,
     ) -> None:
         self._object_storage = object_storage
         self._scanner = scanner
         self._repository = repository
+        self._embedder = embedder
 
     async def __call__(self, message: QueuedMessage) -> None:
         workspace_id = message.tenant_id
@@ -113,3 +118,52 @@ class DocumentProcessor:
         await self._repository.insert_chunks_and_advance(
             workspace_id, document_id, chunks=chunks, next_status=DocumentStatus.EMBEDDING
         )
+
+        try:
+            await self._embed_and_finalize(workspace_id, document_id)
+        except EmbeddingProviderError as exc:
+            if exc.retryable:
+                raise
+            await self._repository.mark_failed(
+                workspace_id, document_id, stage="embedding", reason=str(exc)
+            )
+
+    async def _embed_and_finalize(self, workspace_id: UUID, document_id: UUID) -> None:
+        persisted = await self._repository.list_chunks(workspace_id, document_id)
+
+        pending_hashes = list({c.content_sha256 for c in persisted if c.embedding is None})
+        cached = await self._repository.find_cached_embeddings(
+            workspace_id,
+            content_hashes=pending_hashes,
+            embedding_model=self._embedder.model,
+            embedding_version=self._embedder.embedding_version,
+        )
+
+        to_embed = [c for c in persisted if c.embedding is None and c.content_sha256 not in cached]
+        fresh = await self._embed_missing(to_embed)
+
+        chunk_embeddings = [(c.id, _resolve_embedding(c, cached, fresh)) for c in persisted]
+        await self._repository.attach_embeddings_and_advance(
+            workspace_id,
+            document_id,
+            chunk_embeddings=chunk_embeddings,
+            embedding_model=self._embedder.model,
+            embedding_version=self._embedder.embedding_version,
+            next_status=DocumentStatus.READY,
+        )
+
+    async def _embed_missing(self, to_embed: list[Chunk]) -> dict[UUID, list[float]]:
+        if not to_embed:
+            return {}
+        vectors = await self._embedder.embed_batch([c.content for c in to_embed])
+        return dict(zip((c.id for c in to_embed), vectors, strict=True))
+
+
+def _resolve_embedding(
+    chunk: Chunk, cached: dict[str, list[float]], fresh: dict[UUID, list[float]]
+) -> list[float]:
+    if chunk.embedding is not None:
+        return chunk.embedding
+    if chunk.content_sha256 in cached:
+        return cached[chunk.content_sha256]
+    return fresh[chunk.id]

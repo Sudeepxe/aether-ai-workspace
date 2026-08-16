@@ -15,6 +15,7 @@ import asyncpg
 import pytest
 
 from aether.adapters.clamav.scanner import ClamAvScanner
+from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.postgres.ingestion_repository import PostgresIngestionRepository
 from aether.app.ingestion.process_document import DocumentProcessor
@@ -79,6 +80,7 @@ async def test_a_real_markdown_document_is_processed_end_to_end(
         object_storage=object_storage,
         scanner=ClamAvScanner(host=host, port=port),
         repository=PostgresIngestionRepository(worker_db_pool),
+        embedder=LocalHashEmbeddingAdapter(),
     )
     message = QueuedMessage(
         stream_message_id="1-0",
@@ -95,12 +97,17 @@ async def test_a_real_markdown_document_is_processed_end_to_end(
             document_id,
         )
         chunk_rows = await conn.fetch(
-            "SELECT content, section_path, token_count FROM chunks WHERE document_id = $1 "
-            "ORDER BY char_start",
+            "SELECT content, section_path, token_count, embedding, embedding_model "
+            "FROM chunks WHERE document_id = $1 ORDER BY char_start",
+            document_id,
+        )
+        outbox_row = await conn.fetchrow(
+            "SELECT event_type, payload FROM outbox WHERE aggregate_id = $1 "
+            "AND event_type = 'document.ready'",
             document_id,
         )
 
-    assert doc_row["status"] == "embedding", doc_row["failure_reason"]
+    assert doc_row["status"] == "ready", doc_row["failure_reason"]
     assert doc_row["failure_stage"] is None
     assert len(chunk_rows) >= 1
     combined = " ".join(r["content"] for r in chunk_rows)
@@ -111,6 +118,10 @@ async def test_a_real_markdown_document_is_processed_end_to_end(
     # Details") — proving heading-derived provenance survived the whole
     # pipeline without over-asserting an exact hierarchy depth.
     assert any("Introduction" in r["section_path"] for r in chunk_rows)
+    assert all(r["embedding"] is not None for r in chunk_rows)
+    assert all(r["embedding_model"] == "local-hash-fallback" for r in chunk_rows)
+    assert outbox_row is not None
+    assert outbox_row["payload"]["document_id"] == str(document_id)
 
 
 async def test_a_malicious_document_is_rejected_end_to_end(
@@ -129,6 +140,7 @@ async def test_a_malicious_document_is_rejected_end_to_end(
         object_storage=object_storage,
         scanner=ClamAvScanner(host=host, port=port),
         repository=PostgresIngestionRepository(worker_db_pool),
+        embedder=LocalHashEmbeddingAdapter(),
     )
     message = QueuedMessage(
         stream_message_id="1-0",
@@ -147,8 +159,14 @@ async def test_a_malicious_document_is_rejected_end_to_end(
         chunk_count = await conn.fetchval(
             "SELECT count(*) FROM chunks WHERE document_id = $1", document_id
         )
+        outbox_row = await conn.fetchrow(
+            "SELECT payload FROM outbox WHERE aggregate_id = $1 AND event_type = 'document.failed'",
+            document_id,
+        )
 
     assert doc_row["status"] == "failed"
     assert doc_row["failure_stage"] == "scanning"
     assert "eicar" in doc_row["failure_reason"].lower()
     assert chunk_count == 0
+    assert outbox_row is not None
+    assert outbox_row["payload"]["stage"] == "scanning"

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from uuid import UUID
+import hashlib
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from uuid import UUID, uuid5
 
-from aether.domain.entities import ChunkDraft, DocumentStatus
+from aether.domain.entities import Chunk, ChunkDraft, DocumentStatus
+from aether.ports.embedding import EmbeddingProviderError
 from aether.ports.malware_scan import ScanResult
 
 
@@ -48,6 +51,12 @@ class FakeIngestionRepository:
         self.status_history: list[DocumentStatus] = []
         self.failures: list[_FailureRecord] = []
         self.inserted_chunks: list[ChunkDraft] = []
+        # document_id -> its persisted chunks, mirroring the real
+        # adapter's table closely enough for the embedding-stage tests
+        # (list_chunks/find_cached_embeddings/attach_embeddings_and_
+        # advance) to exercise real cache/atomicity logic, not just
+        # record calls.
+        self._chunks: dict[UUID, list[Chunk]] = {}
 
     async def update_status(
         self, workspace_id: UUID, document_id: UUID, *, status: DocumentStatus
@@ -69,3 +78,84 @@ class FakeIngestionRepository:
     ) -> None:
         self.inserted_chunks.extend(chunks)
         self.status_history.append(next_status)
+        persisted = self._chunks.setdefault(document_id, [])
+        for index, draft in enumerate(chunks):
+            persisted.append(
+                Chunk(
+                    id=uuid5(document_id, str(index)),
+                    workspace_id=workspace_id,
+                    document_id=document_id,
+                    section_path=draft.section_path,
+                    page_start=draft.page_start,
+                    page_end=draft.page_end,
+                    char_start=draft.char_start,
+                    char_end=draft.char_end,
+                    content=draft.content,
+                    content_sha256=hashlib.sha256(draft.content.encode()).hexdigest(),
+                    token_count=draft.token_count,
+                    embedding=None,
+                    embedding_model=None,
+                    embedding_version=None,
+                    created_at=datetime.now(UTC),
+                )
+            )
+
+    async def list_chunks(self, workspace_id: UUID, document_id: UUID) -> list[Chunk]:
+        return list(self._chunks.get(document_id, []))
+
+    async def find_cached_embeddings(
+        self,
+        workspace_id: UUID,
+        *,
+        content_hashes: list[str],
+        embedding_model: str,
+        embedding_version: int,
+    ) -> dict[str, list[float]]:
+        cache: dict[str, list[float]] = {}
+        for chunks in self._chunks.values():
+            for chunk in chunks:
+                if (
+                    chunk.content_sha256 in content_hashes
+                    and chunk.embedding is not None
+                    and chunk.embedding_model == embedding_model
+                    and chunk.embedding_version == embedding_version
+                ):
+                    cache[chunk.content_sha256] = chunk.embedding
+        return cache
+
+    async def attach_embeddings_and_advance(
+        self,
+        workspace_id: UUID,
+        document_id: UUID,
+        *,
+        chunk_embeddings: list[tuple[UUID, list[float]]],
+        embedding_model: str,
+        embedding_version: int,
+        next_status: DocumentStatus,
+    ) -> None:
+        by_id = dict(chunk_embeddings)
+        persisted = self._chunks.get(document_id, [])
+        for index, chunk in enumerate(persisted):
+            if chunk.id in by_id:
+                persisted[index] = replace(
+                    chunk,
+                    embedding=by_id[chunk.id],
+                    embedding_model=embedding_model,
+                    embedding_version=embedding_version,
+                )
+        self.status_history.append(next_status)
+
+
+class FakeEmbedder:
+    model = "fake-embedder"
+    embedding_version = 1
+
+    def __init__(self, *, error: EmbeddingProviderError | None = None) -> None:
+        self.calls: list[list[str]] = []
+        self._error = error
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if self._error is not None:
+            raise self._error
+        self.calls.append(list(texts))
+        return [[float(len(text))] * 4 for text in texts]
