@@ -20,6 +20,7 @@ dependencies = [
   "alembic>=1.13,<2",
   "greenlet>=3.0,<4",  # required by SQLAlchemy's async engine (Alembic's migration runner, migrations/env.py)
   "httpx>=0.27,<1",  # Resend adapter's HTTP client (ADR-11.1) — already a dev dep for TestClient
+  "pgvector>=0.3,<1",  # asyncpg codec for the `vector` column type (S5, D3-2/ADR-3.2)
 ]
 
 [dependency-groups]

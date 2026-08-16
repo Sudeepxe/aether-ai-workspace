@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import asyncpg
+import pgvector.asyncpg
 
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
@@ -15,6 +16,10 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     await conn.set_type_codec(
         "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text"
     )
+    # Lets chunks.embedding round-trip as a plain list[float] (domain
+    # stays pure, ADR-3.4 — no pgvector-specific type crosses into
+    # domain/entities.py) instead of asyncpg's default opaque bytes.
+    await pgvector.asyncpg.register_vector(conn)
 
 
 async def create_pool(database_url: str) -> asyncpg.Pool:

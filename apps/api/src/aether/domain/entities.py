@@ -216,9 +216,11 @@ class UsageEvent:
 @dataclass(frozen=True, slots=True)
 class Budget:
     """One row per workspace (§3.2.14). ``settled_microcents`` is
-    written only by the async metering consumer (§8 F-4: batched, not
-    per-request, to avoid hot-row contention under burst) — never
-    updated synchronously by the admission-check path itself."""
+    settled synchronously, per usage event, by the request that
+    generated it — see adapters/postgres/usage_ledger.py's module
+    docstring for why that's still correct under concurrent load (each
+    settlement is one atomic transaction) even though §8's F-4 finding
+    calls for batching it for throughput, not correctness."""
 
     workspace_id: UUID
     monthly_limit_microcents: int
@@ -226,3 +228,79 @@ class Budget:
     current_period_start: date
     settled_microcents: int
     updated_at: datetime
+
+
+class DocumentStatus(StrEnum):
+    """A document's ingestion-pipeline stage (FR-KB-2's visible
+    pipeline, §3.2.7). Each value is both "where it is" while in
+    progress and, for QUEUED..EMBEDDING, "what's about to run next" —
+    the terminal states are READY and FAILED."""
+
+    QUEUED = "queued"
+    SCANNING = "scanning"
+    PARSING = "parsing"
+    CHUNKING = "chunking"
+    EMBEDDING = "embedding"
+    READY = "ready"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class Document:
+    """A workspace's uploaded source file and its ingestion state
+    (§8.1). ``object_key`` is content-addressed (SHA-256, ADR-3.8) —
+    ``content_sha256`` and the key's derivation are the same hash, kept
+    as separate columns because one names *what* was uploaded (dedupe
+    key) and the other names *where* the bytes live (storage key),
+    which happen to coincide today but are conceptually distinct.
+    ``version``/``superseded_by`` exist for FR-KB-6 (re-ingestion on
+    update) — Phase 2, unused until then but present now because
+    retrofitting a version column after the fact is the kind of thing
+    this project's schema discipline avoids."""
+
+    id: UUID
+    workspace_id: UUID
+    filename: str
+    content_sha256: str
+    mime: str
+    size_bytes: int
+    object_key: str
+    status: DocumentStatus
+    failure_stage: str | None
+    failure_reason: str | None
+    version: int
+    superseded_by: UUID | None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class Chunk:
+    """One retrievable unit of a document (§8.1, ADR-6.2). Provenance
+    (``section_path``, ``page_start``/``page_end``, ``char_start``/
+    ``char_end``) is captured at chunk-creation time, not
+    reverse-engineered later — pages are nullable since not every
+    source format has them (MD/TXT/HTML don't; PDF does).
+    ``embedding`` is a plain list of floats at the domain layer (never
+    a pgvector-specific type — domain stays pure, ADR-3.4); the
+    Postgres adapter handles the actual vector-column conversion.
+    ``embedding_model``/``embedding_version`` are None until the
+    embedding stage completes; a chunk row exists (for chunking-stage
+    provenance/debugging) before it has a vector."""
+
+    id: UUID
+    workspace_id: UUID
+    document_id: UUID
+    section_path: str
+    page_start: int | None
+    page_end: int | None
+    char_start: int
+    char_end: int
+    content: str
+    content_sha256: str
+    token_count: int
+    embedding: list[float] | None
+    embedding_model: str | None
+    embedding_version: int | None
+    created_at: datetime
