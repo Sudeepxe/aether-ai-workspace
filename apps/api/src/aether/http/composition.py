@@ -473,4 +473,5 @@ def _build_generator(settings: Settings, *, clock: ClockPort) -> GeneratorPort:
         breakers=breakers,
         model_chain=model_chain,
         max_tokens=settings.router_max_tokens,
+        max_concurrent_per_provider=settings.router_max_concurrent_per_provider,
     )

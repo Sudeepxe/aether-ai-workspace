@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -212,3 +213,54 @@ async def test_all_providers_unavailable_raises_no_provider_available() -> None:
     with pytest.raises(NoProviderAvailableError):
         async for _ in router.generate(thread_history=[], user_content="hi"):
             pass
+
+
+class _ConcurrencyTrackingProviderAdapter:
+    """Records how many calls were simultaneously in flight against it —
+    proves the router's per-provider semaphore actually gates concurrent
+    *streaming duration*, not just concurrent call starts (issue #36:
+    one tenant's burst must not saturate a shared provider connection
+    pool for every other tenant)."""
+
+    def __init__(self) -> None:
+        self.name = "tracked"
+        self.current_concurrency = 0
+        self.max_observed_concurrency = 0
+        self._lock = asyncio.Lock()
+
+    def capabilities(self) -> list[ProviderCapability]:
+        return [_CAPABILITY]
+
+    async def stream_completion(self, request: CompletionRequest) -> AsyncIterator[ProviderChunk]:
+        async with self._lock:
+            self.current_concurrency += 1
+            self.max_observed_concurrency = max(
+                self.max_observed_concurrency, self.current_concurrency
+            )
+        try:
+            await asyncio.sleep(0.05)
+            yield "chunk"
+            yield ProviderUsage(prompt_tokens=1, completion_tokens=1)
+        finally:
+            async with self._lock:
+                self.current_concurrency -= 1
+
+
+async def test_concurrency_semaphore_bounds_in_flight_requests_per_provider() -> None:
+    tracked = _ConcurrencyTrackingProviderAdapter()
+    clock = FakeClock(start=datetime.now(UTC))
+    router = LlmRouter(
+        providers={"tracked": tracked},
+        breakers={"tracked": CircuitBreaker(clock=clock)},
+        model_chain=[("tracked", "fake-model")],
+        max_concurrent_per_provider=2,
+    )
+
+    async def _consume() -> None:
+        async for _ in router.generate(thread_history=[], user_content="hi"):
+            pass
+
+    await asyncio.gather(*[_consume() for _ in range(5)])
+
+    assert tracked.max_observed_concurrency == 2
+    assert tracked.current_concurrency == 0  # every semaphore slot was released
