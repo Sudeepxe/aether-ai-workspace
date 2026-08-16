@@ -105,6 +105,19 @@ class Settings(BaseSettings):
     clamav_host: str = "localhost"
     clamav_port: int = 3310
 
+    # --- Grounded chat refusal (Sprint 6, ADR-6.4) -------------------------
+    # Gate 1's retrieval-score threshold: the ADR is explicit this must be
+    # "calibrated per embedding model on the golden set", never treated as
+    # a fixed constant — Sprint 7's golden set/eval harness doesn't exist
+    # yet, so this is a deliberately conservative placeholder, not a
+    # fabricated "calibrated" number. A single global value is an honest
+    # MVP simplification (matching the schema's own "exactly one
+    # embedding_version in play until a real model migration happens"
+    # posture, S5's chunks migration) — the natural extension point once
+    # multiple embedding models/versions coexist is a per-(model, version)
+    # mapping, not a bigger constant.
+    retrieval_refusal_threshold: float = 0.01
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

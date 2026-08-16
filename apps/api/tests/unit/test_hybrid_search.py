@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from aether.app.retrieval.hybrid_search import HybridSearch
+from aether.app.retrieval.hybrid_search import _RRF_CONSTANT, HybridSearch
 from aether.ports.retrieval import ChunkSearchResult
 from tests.unit.fakes.retrieval import FakeChunkSearch, FakeQueryEmbedder
 
@@ -153,3 +153,32 @@ async def test_dual_feed_searches_the_lexical_leg_once_per_query_but_the_vector_
         "what about its pricing?",
         "What is Acme Corp's pricing?",
     ]
+
+
+async def test_fused_score_is_the_real_rrf_magnitude_not_renormalized_to_one() -> None:
+    """Regression test: MMR's internal relevance normalization (always
+    ~1.0 for the top candidate of *any* query, including an
+    irrelevant one) must never leak into the score issue #58's Gate 1
+    uses to decide whether to refuse — that score has to reflect
+    genuine RRF strength, comparable across different queries, not a
+    value that reads as "great match" by construction every time."""
+    only_in_one_leg = _result(section="one-leg", embedding=[1.0, 0.0, 0.0, 0.0])
+    chunk_search = FakeChunkSearch(vector_results=[only_in_one_leg], lexical_results=[])
+    search = HybridSearch(chunk_search=chunk_search, embedder=FakeQueryEmbedder())
+
+    result = await search.search(uuid4(), query="q", k=1)
+
+    expected_raw_rrf_score = 1.0 / (_RRF_CONSTANT + 1)  # rank 1, one leg only
+    assert result.chunks[0].fused_score == pytest.approx(expected_raw_rrf_score)
+    assert result.chunks[0].fused_score < 0.02  # nowhere near a normalized ~1.0
+
+
+async def test_fused_score_is_higher_for_a_chunk_found_by_both_legs() -> None:
+    both_legs = _result(section="both", embedding=[1.0, 0.0, 0.0, 0.0])
+    chunk_search = FakeChunkSearch(vector_results=[both_legs], lexical_results=[both_legs])
+    search = HybridSearch(chunk_search=chunk_search, embedder=FakeQueryEmbedder())
+
+    result = await search.search(uuid4(), query="q", k=1)
+
+    expected_raw_rrf_score = 2.0 / (_RRF_CONSTANT + 1)  # rank 1 in both legs
+    assert result.chunks[0].fused_score == pytest.approx(expected_raw_rrf_score)

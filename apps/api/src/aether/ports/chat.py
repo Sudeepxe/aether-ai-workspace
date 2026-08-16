@@ -19,7 +19,32 @@ __all__ = [
     "MessageRole",
     "MessageStatus",
     "MessageStorePort",
+    "RetrievedContext",
+    "RetrievedContextChunk",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievedContextChunk:
+    """The minimal shape a generator needs to answer from a retrieved
+    chunk — deliberately independent of app.retrieval.hybrid_search's
+    RankedChunk (ports must not import from app, ADR per the layered
+    architecture contract); the caller (issue #60's SendMessage) maps
+    one to the other."""
+
+    content: str
+    document_title: str
+    section_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievedContext:
+    """Present (even if ``chunks`` is empty) means "this is a grounded
+    turn — answer only from these chunks, or say so explicitly if
+    there's nothing relevant" (ADR-6.4's Gate 2 protocol). Absent means
+    an ordinary, ungrounded turn — today's pre-S6 behavior, unchanged."""
+
+    chunks: list[RetrievedContextChunk]
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,13 +89,24 @@ class GeneratorPort(Protocol):
         ...
 
     def generate(
-        self, *, thread_history: list[Message], user_content: str
+        self,
+        *,
+        thread_history: list[Message],
+        user_content: str,
+        context: RetrievedContext | None = None,
     ) -> AsyncIterator[GeneratorChunk]:
         """Yields text deltas, then exactly one GenerationUsage as the
         final item. May raise (a real provider's failure modes —
         breaker-open, timeout, all-providers-down) — the orchestrator is
         responsible for turning that into a persisted partial message
-        and an error event, not silently swallowing it."""
+        and an error event, not silently swallowing it.
+
+        ``context`` present (issue #58, ADR-6.4's Gate 2) means this
+        turn must answer only from ``context.chunks`` — explicitly
+        declining ("not in the knowledge base") if it can't, never
+        falling back to the model's own general knowledge or to
+        ``thread_history``. Absent means an ordinary ungrounded turn,
+        unchanged from pre-S6 behavior."""
         ...
 
 

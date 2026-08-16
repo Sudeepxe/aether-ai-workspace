@@ -40,6 +40,11 @@ class RankedChunk:
     page_end: int | None
     content: str
     fused_score: float
+    """The raw (un-normalized) Reciprocal Rank Fusion score — a sum of
+    ``1/(k+rank)`` terms across the legs this chunk appeared in.
+    Absolute, not relative to this query's candidate pool (unlike the
+    normalized relevance MMR's own selection math uses internally) —
+    this is the value issue #58's Gate 1 compares against a threshold."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,21 +120,37 @@ def _reciprocal_rank_fusion(
 
 
 def _mmr_select(fused: list[tuple[ChunkSearchResult, float]], *, k: int) -> list[RankedChunk]:
+    """Selects up to k chunks balancing relevance against diversity.
+
+    MMR's lambda-blend needs relevance and the cosine-similarity
+    diversity penalty on comparable [0, 1] scales, so a *normalized*
+    relevance drives the selection math — but that normalization is
+    relative to this query's own candidate pool alone (it always maps
+    the top candidate to ~1.0, even for a query that matched nothing
+    well), so it must never leak into RankedChunk.fused_score: issue
+    #58's Gate 1 needs the real, un-normalized RRF magnitude to make an
+    absolute pass/fail call, not a value that reads as "great match"
+    for every query by construction.
+    """
     if not fused:
         return []
-    relevance = _normalize([score for _, score in fused])
-    candidates = list(zip((r for r, _ in fused), relevance, strict=True))
-    selected: list[tuple[ChunkSearchResult, float]] = []
+    raw_scores = [score for _, score in fused]
+    normalized_relevance = _normalize(raw_scores)
+    candidates = list(zip((r for r, _ in fused), raw_scores, normalized_relevance, strict=True))
+    selected: list[tuple[ChunkSearchResult, float, float]] = []
 
     while candidates and len(selected) < k:
         best_index = 0
         best_mmr_score = float("-inf")
-        for index, (result, result_relevance) in enumerate(candidates):
+        for index, (result, _raw_score, relevance) in enumerate(candidates):
             diversity_penalty = max(
-                (_cosine_similarity(result.embedding, chosen.embedding) for chosen, _ in selected),
+                (
+                    _cosine_similarity(result.embedding, chosen.embedding)
+                    for chosen, _, _ in selected
+                ),
                 default=0.0,
             )
-            mmr_score = _MMR_LAMBDA * result_relevance - (1 - _MMR_LAMBDA) * diversity_penalty
+            mmr_score = _MMR_LAMBDA * relevance - (1 - _MMR_LAMBDA) * diversity_penalty
             if mmr_score > best_mmr_score:
                 best_mmr_score = mmr_score
                 best_index = index
@@ -144,9 +165,9 @@ def _mmr_select(fused: list[tuple[ChunkSearchResult, float]], *, k: int) -> list
             page_start=result.page_start,
             page_end=result.page_end,
             content=result.content,
-            fused_score=relevance_score,
+            fused_score=raw_score,
         )
-        for result, relevance_score in selected
+        for result, raw_score, _relevance in selected
     ]
 
 
