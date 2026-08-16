@@ -23,6 +23,7 @@ from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.openai.completion import OpenAiCompletionAdapter
 from aether.adapters.postgres.audit_log import PostgresAuditLog
 from aether.adapters.postgres.budget_repository import PostgresBudgetRepository
+from aether.adapters.postgres.document_repository import PostgresDocumentRepository
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
 from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
 from aether.adapters.postgres.message_repository import PostgresMessageRepository
@@ -53,6 +54,11 @@ from aether.app.auth.revoke_user_sessions import RevokeUserSessions
 from aether.app.chat.cancel_generation import CancelGeneration
 from aether.app.chat.get_generation_status import GetGenerationStatus
 from aether.app.chat.send_message import SendMessage
+from aether.app.documents.confirm_upload import ConfirmDocumentUpload
+from aether.app.documents.delete_document import DeleteDocument
+from aether.app.documents.get_document import GetDocument
+from aether.app.documents.initiate_upload import InitiateDocumentUpload
+from aether.app.documents.list_documents import ListDocuments
 from aether.app.invitations.accept_invitation import AcceptInvitation
 from aether.app.invitations.create_invitation import CreateInvitation
 from aether.app.invitations.revoke_invitation import RevokeInvitation
@@ -82,6 +88,7 @@ from aether.ports.metering import BudgetAdmissionPort, BudgetRepositoryPort, Usa
 from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.rate_limit import RateLimitPort
 from aether.ports.repositories import (
+    DocumentRepositoryPort,
     InvitationRepositoryPort,
     Membership,
     MembershipRepositoryPort,
@@ -179,6 +186,7 @@ class WorkspaceScope:
     invitations: InvitationRepositoryPort
     threads: ThreadRepositoryPort
     messages: MessageRepositoryPort
+    documents: DocumentRepositoryPort
     budgets: BudgetRepositoryPort
     audit_log: AuditLogPort
     outbox: OutboxRepositoryPort
@@ -199,6 +207,11 @@ class WorkspaceScope:
     list_messages: ListMessages
     get_budget: GetBudget
     update_budget: UpdateBudget
+    initiate_document_upload: InitiateDocumentUpload
+    confirm_document_upload: ConfirmDocumentUpload
+    list_documents: ListDocuments
+    get_document: GetDocument
+    delete_document: DeleteDocument
 
 
 def build_workspace_scope(
@@ -207,12 +220,14 @@ def build_workspace_scope(
     *,
     clock: ClockPort,
     ids: IdPort,
+    object_storage: ObjectStoragePort,
 ) -> WorkspaceScope:
     workspaces = PostgresWorkspaceRepository(conn)
     memberships = PostgresMembershipRepository(conn)
     invitations = PostgresInvitationRepository(conn)
     threads = PostgresThreadRepository(conn)
     messages = PostgresMessageRepository(conn)
+    documents = PostgresDocumentRepository(conn)
     budgets = PostgresBudgetRepository(conn)
     audit_log = PostgresAuditLog(conn)
     outbox = PostgresOutboxRepository(conn)
@@ -224,6 +239,7 @@ def build_workspace_scope(
         invitations=invitations,
         threads=threads,
         messages=messages,
+        documents=documents,
         budgets=budgets,
         audit_log=audit_log,
         outbox=outbox,
@@ -247,6 +263,13 @@ def build_workspace_scope(
         list_messages=ListMessages(messages=messages),
         get_budget=GetBudget(budgets=budgets),
         update_budget=UpdateBudget(budgets=budgets, audit_log=audit_log, ids=ids),
+        initiate_document_upload=InitiateDocumentUpload(object_storage=object_storage, ids=ids),
+        confirm_document_upload=ConfirmDocumentUpload(
+            documents=documents, object_storage=object_storage, outbox=outbox, ids=ids
+        ),
+        list_documents=ListDocuments(documents=documents),
+        get_document=GetDocument(documents=documents),
+        delete_document=DeleteDocument(documents=documents, outbox=outbox, clock=clock, ids=ids),
     )
 
 
@@ -257,6 +280,7 @@ async def resolve_workspace_scope(
     *,
     clock: ClockPort,
     ids: IdPort,
+    object_storage: ObjectStoragePort,
 ) -> WorkspaceScope | None:
     """Looks up the caller's membership under ``conn`` (which must already
     have ``app.tenant_id`` set to ``workspace_id`` — see
@@ -268,7 +292,9 @@ async def resolve_workspace_scope(
     caller_membership = await memberships.get(workspace_id, user_id)
     if caller_membership is None:
         return None
-    return build_workspace_scope(conn, caller_membership, clock=clock, ids=ids)
+    return build_workspace_scope(
+        conn, caller_membership, clock=clock, ids=ids, object_storage=object_storage
+    )
 
 
 async def resolve_caller_membership(

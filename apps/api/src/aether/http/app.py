@@ -23,6 +23,8 @@ from aether.domain.errors import (
     AuthenticationFailedError,
     BudgetConcurrencyConflictError,
     BudgetExhaustedError,
+    DocumentNotFoundError,
+    DocumentUploadIncompleteError,
     DomainError,
     EmailAlreadyRegisteredError,
     GenerationNotFoundError,
@@ -43,6 +45,7 @@ from aether.http.authz import assert_all_routes_declare_auth
 from aether.http.composition import build_container
 from aether.http.problem_json import install_error_handlers
 from aether.http.routes.auth import router as auth_router
+from aether.http.routes.documents import router as documents_router
 from aether.http.routes.generations import router as generations_router
 from aether.http.routes.invitations import router as invitations_router
 from aether.http.routes.me import router as me_router
@@ -74,6 +77,11 @@ _ERROR_STATUS: dict[type[DomainError], int] = {
     InvalidPasswordResetTokenError: 404,
     ThreadNotFoundError: 404,
     GenerationNotFoundError: 404,
+    DocumentNotFoundError: 404,
+    # The client claims an upload finished; storage disagrees — a
+    # precondition failure on the caller's own claimed state, not a
+    # server error.
+    DocumentUploadIncompleteError: 409,
     # Refused before any provider call (§3.2.14) — a hard limit, not a
     # transient failure, but 429 (not 402/403) matches the rest of the
     # API's rate-limit vocabulary for "retry later, not your credentials".
@@ -179,6 +187,7 @@ def create_app() -> FastAPI:
     app.include_router(messages_router)
     app.include_router(generations_router)
     app.include_router(metering_router)
+    app.include_router(documents_router)
 
     install_error_handlers(app, error_status=_ERROR_STATUS)
 
