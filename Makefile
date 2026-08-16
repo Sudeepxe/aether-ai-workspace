@@ -8,7 +8,7 @@ API_DIR := apps/api
 WEB_DIR := apps/web
 COMPOSE := docker compose -f infra/compose/compose.yml
 
-.PHONY: help bootstrap dev down lint typecheck test build clean env-check secrets-edit secrets-env
+.PHONY: help bootstrap dev down lint typecheck test build clean env-check secrets-edit secrets-env minio-setup
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -27,10 +27,19 @@ bootstrap: ## Full dev setup: toolchain check, deps, hooks, infra pull (target â
 
 dev: ## Start dev infra services (PG, Redis, MinIO, mailpit)
 	$(COMPOSE) --profile dev up -d --wait
+	$(MAKE) minio-setup
 	@echo "infra up â€” api: cd $(API_DIR) && uv run python -m aether.http.main"
 
 down: ## Stop dev infra
 	$(COMPOSE) --profile dev down
+
+minio-setup: ## Idempotently ensure the dev document-storage bucket exists (S5, ADR-3.8)
+	cd $(API_DIR) && uv run python -c "\
+import asyncio; \
+from aether.adapters.minio.object_storage import MinioObjectStorage; \
+from aether.config import get_settings; \
+s = get_settings(); \
+asyncio.run(MinioObjectStorage(endpoint=s.object_storage_endpoint, access_key=s.object_storage_access_key, secret_key=s.object_storage_secret_key, secure=s.object_storage_secure, bucket=s.object_storage_bucket).ensure_bucket())"
 
 lint: env-check ## Ruff + import boundaries + eslint
 	cd $(API_DIR) && uv run ruff format --check . && uv run ruff check . \

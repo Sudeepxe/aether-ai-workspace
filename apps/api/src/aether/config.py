@@ -89,6 +89,18 @@ class Settings(BaseSettings):
     # provider connection pool for every other tenant.
     router_max_concurrent_per_provider: int = 4
 
+    # --- Object storage (Sprint 5, §3.2.13, ADR-3.8) --------------------
+    # Dev-safe defaults matching MINIO_ROOT_USER/MINIO_ROOT_PASSWORD in
+    # infra/compose/compose.yml — committed, non-secret, dev-profile-only
+    # (same posture as POSTGRES_PASSWORD). Real values come from the
+    # SOPS bundle in any non-dev profile.
+    object_storage_endpoint: str = "localhost:9000"
+    object_storage_access_key: str = "aether"
+    object_storage_secret_key: str = "aether-dev-only"  # noqa: S105 — dev-only, not a real credential
+    object_storage_secure: bool = False
+    object_storage_bucket: str = "aether-documents"
+    object_storage_presign_ttl_seconds: int = 900  # 15 min, ADR-3.8
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
