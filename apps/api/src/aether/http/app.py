@@ -21,6 +21,8 @@ from fastapi import FastAPI, Request, Response
 from aether.config import get_settings
 from aether.domain.errors import (
     AuthenticationFailedError,
+    BudgetConcurrencyConflictError,
+    BudgetExhaustedError,
     DomainError,
     EmailAlreadyRegisteredError,
     GenerationNotFoundError,
@@ -30,6 +32,7 @@ from aether.domain.errors import (
     InvalidRefreshTokenError,
     LastOwnerProtectionError,
     MembershipNotFoundError,
+    NoProviderAvailableError,
     RefreshTokenReusedError,
     ThreadNotFoundError,
     UserNotFoundError,
@@ -44,6 +47,7 @@ from aether.http.routes.generations import router as generations_router
 from aether.http.routes.invitations import router as invitations_router
 from aether.http.routes.me import router as me_router
 from aether.http.routes.messages import router as messages_router
+from aether.http.routes.metering import router as metering_router
 from aether.http.routes.threads import router as threads_router
 from aether.http.routes.workspaces import router as workspaces_router
 from aether.logging import configure_logging, get_logger
@@ -70,6 +74,15 @@ _ERROR_STATUS: dict[type[DomainError], int] = {
     InvalidPasswordResetTokenError: 404,
     ThreadNotFoundError: 404,
     GenerationNotFoundError: 404,
+    # Refused before any provider call (§3.2.14) — a hard limit, not a
+    # transient failure, but 429 (not 402/403) matches the rest of the
+    # API's rate-limit vocabulary for "retry later, not your credentials".
+    BudgetExhaustedError: 429,
+    # Every provider in the fallback chain has an open circuit breaker
+    # (§3.2.4) — a full outage of the router's dependencies, not a client
+    # error.
+    NoProviderAvailableError: 503,
+    BudgetConcurrencyConflictError: 409,
 }
 
 
@@ -165,6 +178,7 @@ def create_app() -> FastAPI:
     app.include_router(threads_router)
     app.include_router(messages_router)
     app.include_router(generations_router)
+    app.include_router(metering_router)
 
     install_error_handlers(app, error_status=_ERROR_STATUS)
 

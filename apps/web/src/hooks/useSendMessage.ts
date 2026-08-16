@@ -11,6 +11,7 @@ import { useCallback, useRef } from "react";
 
 import { cancelGeneration, postMessageForStream } from "../api/chat";
 import type { DoneEventData, ErrorEventData, MetaEventData, TokenEventData } from "../api/types";
+import { toApiError } from "../lib/apiClient";
 import { SeqDeduper, streamSse } from "../lib/sse";
 import { RafBatcher, useChatStreamStore, type StreamPhase } from "../state/chatStreamStore";
 
@@ -39,11 +40,24 @@ export function useSendMessage(
           controller.signal,
         );
       } catch {
-        useChatStreamStore.getState().setError("network error sending message");
+        useChatStreamStore.getState().failBeforeStream(threadId, "network error sending message");
         return;
       }
       if (!response.ok) {
-        useChatStreamStore.getState().setError(`request failed (${response.status})`);
+        const apiError = await toApiError(response);
+        // Refused before any provider call (§3.2.14) — a distinct,
+        // actionable message rather than a bare status code, since this
+        // is the one failure mode a user can actually do something
+        // about (wait for the next billing period, or an Admin raises
+        // the workspace's budget via PUT .../budget).
+        useChatStreamStore
+          .getState()
+          .failBeforeStream(
+            threadId,
+            apiError.code === "budget_exhausted"
+              ? "This workspace's monthly budget has been used up. An admin can raise it, or wait for the next billing period."
+              : apiError.message,
+          );
         return;
       }
 
@@ -83,6 +97,12 @@ export function useSendMessage(
                   : data.status;
             useChatStreamStore.getState().setPhase(phase);
             await queryClient.invalidateQueries({ queryKey: ["messages", workspaceId, threadId] });
+            // Settlement (real cost) lands async-to-the-stream but
+            // same-request (see the orchestrator's send_message.py) —
+            // by the time `done` arrives it's already written, so the
+            // budget indicator can refresh right away instead of
+            // waiting on its 30s poll.
+            await queryClient.invalidateQueries({ queryKey: ["budget", workspaceId] });
             useChatStreamStore.getState().clear();
             break;
           }
@@ -102,7 +122,7 @@ export function useSendMessage(
   const cancel = useCallback(() => {
     const generationId = useChatStreamStore.getState().activeStream?.generationId;
     abortRef.current?.abort();
-    if (generationId !== undefined) {
+    if (generationId !== undefined && generationId !== null) {
       // Fire-and-forget: aborting the client read alone doesn't free
       // server-side generation capacity (ADR-5.3) — this call does.
       void cancelGeneration(workspaceId, generationId);

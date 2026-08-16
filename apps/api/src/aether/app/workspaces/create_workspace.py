@@ -19,8 +19,9 @@ from uuid import UUID
 
 from aether.domain.entities import MembershipRole, Workspace
 from aether.ports.audit import AuditLogPort
+from aether.ports.metering import BudgetRepositoryPort
 from aether.ports.repositories import MembershipRepositoryPort, WorkspaceRepositoryPort
-from aether.ports.security import IdPort
+from aether.ports.security import ClockPort, IdPort
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,13 +37,21 @@ class CreateWorkspace:
         *,
         workspaces: WorkspaceRepositoryPort,
         memberships: MembershipRepositoryPort,
+        budgets: BudgetRepositoryPort,
         audit_log: AuditLogPort,
+        clock: ClockPort,
         ids: IdPort,
+        default_monthly_budget_microcents: int,
+        default_budget_soft_pct: int,
     ) -> None:
         self._workspaces = workspaces
         self._memberships = memberships
+        self._budgets = budgets
         self._audit_log = audit_log
+        self._clock = clock
         self._ids = ids
+        self._default_monthly_budget_microcents = default_monthly_budget_microcents
+        self._default_budget_soft_pct = default_budget_soft_pct
 
     async def execute(self, command: CreateWorkspaceCommand) -> Workspace:
         workspace_id = command.workspace_id
@@ -63,6 +72,15 @@ class CreateWorkspace:
             workspace_id=workspace_id,
             user_id=command.owner_user_id,
             role=MembershipRole.OWNER,
+        )
+        # Provisioned here, not lazily on first chat request: the budget
+        # admission check (§3.2.14) fails closed on a missing row, so
+        # without this every workspace's first message would be refused.
+        await self._budgets.create(
+            workspace_id=workspace_id,
+            monthly_limit_microcents=self._default_monthly_budget_microcents,
+            soft_pct=self._default_budget_soft_pct,
+            current_period_start=self._clock.now().date().replace(day=1),
         )
         await self._audit_log.record(
             id=self._ids.new_id(),

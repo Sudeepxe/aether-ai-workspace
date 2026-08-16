@@ -5,7 +5,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from uuid import UUID
 
-from aether.domain.entities import Message, MessageRole, MessageStatus, Thread
+from aether.domain.entities import Message, MessageRole, MessageStatus, Thread, UsageEvent
+from aether.ports.chat import GenerationUsage, GeneratorChunk
+from aether.ports.metering import AdmissionDecision, UsageEventKind, UsageModelRollup, UsageRollup
 from aether.ports.streaming import BufferedEvent
 
 
@@ -177,19 +179,48 @@ class FakeMessageStore:
         return list(reversed(newest_first))
 
 
+_DEFAULT_USAGE = GenerationUsage(
+    prompt_tokens=1, completion_tokens=1, cost_microcents=100, model="fake-model"
+)
+
+
 class FakeGenerator:
     """Deterministic, test-controlled token source — a simpler stand-in
     than EchoGenerator for unit tests that don't want word-splitting
-    semantics muddying assertions."""
+    semantics muddying assertions. Yields a GenerationUsage after all
+    deltas (matching every real GeneratorPort implementation's contract)
+    unless ``usage=None``; optionally raises ``error`` after
+    ``fail_after`` deltas, to exercise the orchestrator's pre-first-token
+    vs mid-stream failure handling."""
 
-    def __init__(self, *, deltas: list[str]) -> None:
+    def __init__(
+        self,
+        *,
+        deltas: list[str],
+        usage: GenerationUsage | None = _DEFAULT_USAGE,
+        error: Exception | None = None,
+        fail_after: int = 0,
+    ) -> None:
         self._deltas = deltas
+        self._usage = usage
+        self._error = error
+        self._fail_after = fail_after
+
+    @property
+    def primary_model(self) -> str:
+        return "fake-model"
 
     async def generate(
         self, *, thread_history: list[Message], user_content: str
-    ) -> AsyncIterator[str]:
-        for delta in self._deltas:
+    ) -> AsyncIterator[GeneratorChunk]:
+        for i, delta in enumerate(self._deltas):
+            if self._error is not None and i == self._fail_after:
+                raise self._error
             yield delta
+        if self._error is not None and self._fail_after >= len(self._deltas):
+            raise self._error
+        if self._usage is not None:
+            yield self._usage
 
 
 class FakeStreamBuffer:
@@ -234,3 +265,99 @@ class FakeCancellation:
         self, workspace_id: UUID, generation_id: UUID
     ) -> AsyncIterator[_FakeSubscription]:
         yield _FakeSubscription(self.cancelled_generations, generation_id)
+
+
+class FakeBudgetAdmission:
+    """Allows everything by default — tests that want a refusal set
+    ``allow_workspace=False`` or ``allow_global=False`` explicitly, so a
+    test's intent is visible at the call site rather than buried in a
+    fixture default."""
+
+    def __init__(
+        self,
+        *,
+        allow_global: bool = True,
+        allow_workspace: bool = True,
+        settled_microcents: int = 0,
+        monthly_limit_microcents: int = 500_000_000,
+    ) -> None:
+        self.allow_global = allow_global
+        self.allow_workspace = allow_workspace
+        self.settled_microcents = settled_microcents
+        self.monthly_limit_microcents = monthly_limit_microcents
+        self.checked_workspaces: list[UUID] = []
+        self.global_checks = 0
+
+    async def check(self, workspace_id: UUID, *, ceiling_microcents: int) -> AdmissionDecision:
+        self.checked_workspaces.append(workspace_id)
+        return AdmissionDecision(
+            allowed=self.allow_workspace,
+            soft_limit_crossed=False,
+            settled_microcents=self.settled_microcents,
+            monthly_limit_microcents=self.monthly_limit_microcents,
+        )
+
+    async def check_global(self, *, ceiling_microcents: int) -> bool:
+        self.global_checks += 1
+        return self.allow_global
+
+
+class FakeUsageLedger:
+    def __init__(self) -> None:
+        self.recorded: list[UsageEvent] = []
+
+    async def record(
+        self,
+        *,
+        id: UUID,
+        workspace_id: UUID,
+        user_id: UUID | None,
+        kind: UsageEventKind,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost_microcents: int,
+        generation_id: UUID | None,
+    ) -> UsageEvent:
+        event = UsageEvent(
+            id=id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            kind=kind,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_microcents=cost_microcents,
+            generation_id=generation_id,
+            occurred_at=datetime.now().astimezone(),
+        )
+        self.recorded.append(event)
+        return event
+
+    async def rollup(self, workspace_id: UUID, *, since: datetime) -> UsageRollup:
+        matching = [e for e in self.recorded if e.workspace_id == workspace_id]
+        by_model: dict[str, UsageModelRollup] = {}
+        for e in matching:
+            current = by_model.get(
+                e.model,
+                UsageModelRollup(
+                    model=e.model,
+                    request_count=0,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    cost_microcents=0,
+                ),
+            )
+            by_model[e.model] = UsageModelRollup(
+                model=e.model,
+                request_count=current.request_count + 1,
+                prompt_tokens=current.prompt_tokens + e.prompt_tokens,
+                completion_tokens=current.completion_tokens + e.completion_tokens,
+                cost_microcents=current.cost_microcents + e.cost_microcents,
+            )
+        return UsageRollup(
+            workspace_id=workspace_id,
+            period_start=since,
+            by_model=list(by_model.values()),
+            total_cost_microcents=sum(e.cost_microcents for e in matching),
+        )

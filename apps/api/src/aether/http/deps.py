@@ -98,7 +98,16 @@ async def get_new_workspace_connection(
     workspace_id = container.ids.new_id()
     async with container.db_pool.acquire() as conn, conn.transaction():
         await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
-        yield workspace_id, build_create_workspace_use_case(conn, ids=container.ids)
+        yield (
+            workspace_id,
+            build_create_workspace_use_case(
+                conn,
+                clock=container.clock,
+                ids=container.ids,
+                default_monthly_budget_microcents=container.default_workspace_monthly_budget_microcents,
+                default_budget_soft_pct=container.default_budget_soft_pct,
+            ),
+        )
 
 
 async def get_chat_authorization(

@@ -64,3 +64,28 @@ export interface ErrorEventData {
   code: string;
   message: string;
 }
+
+// Usage + budget (issue #39, §3.2.14) — mirrors http/schemas/metering.py.
+export interface UsageModelRollup {
+  model: string;
+  request_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_microcents: number;
+}
+
+export interface UsageResponse {
+  workspace_id: string;
+  period_start: string;
+  by_model: UsageModelRollup[];
+  total_cost_microcents: number;
+}
+
+export interface BudgetResponse {
+  workspace_id: string;
+  monthly_limit_microcents: number;
+  soft_pct: number;
+  current_period_start: string;
+  settled_microcents: number;
+  updated_at: string;
+}

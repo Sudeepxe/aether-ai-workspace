@@ -83,3 +83,22 @@ class GenerationNotFoundError(DomainError):
     """Referenced generation id has no live entry in the Redis stream
     buffer — either it never existed, already completed and its buffer
     TTL expired, or it belongs to a different workspace."""
+
+
+class BudgetExhaustedError(DomainError):
+    """Refused before any provider call (§3.2.14): this request's cost
+    ceiling estimate would exceed the workspace's (or the global) monthly
+    limit. Hard-limit enforcement, not a warning — the soft-limit case
+    admits the request and carries a banner/header instead."""
+
+
+class NoProviderAvailableError(DomainError):
+    """Every provider in the routing fallback chain has an open circuit
+    breaker (§3.2.4) — the router-level equivalent of a full outage."""
+
+
+class BudgetConcurrencyConflictError(DomainError):
+    """An If-Match/ETag precondition on a budget mutation did not match
+    the current state — same posture as WorkspaceConcurrencyConflictError,
+    kept as its own type since budgets and workspaces are distinct
+    entities with independently evolving updated_at values."""

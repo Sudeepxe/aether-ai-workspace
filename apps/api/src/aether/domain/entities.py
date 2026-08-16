@@ -7,7 +7,7 @@ the domain-purity import rule (ADR-3.4, enforced by import-linter).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -186,3 +186,43 @@ class RefreshToken:
     expires_at: datetime
     revoked_at: datetime | None
     created_at: datetime
+
+
+class UsageEventKind(StrEnum):
+    CHAT = "chat"
+    EMBED = "embed"
+    REWRITE = "rewrite"
+    COMPACT = "compact"
+
+
+@dataclass(frozen=True, slots=True)
+class UsageEvent:
+    """One append-only ledger row (FR-AD-2/3, §8.1). ``cost_microcents``
+    is 1e-6 of a US cent (1e-8 of a dollar) — fine enough granularity
+    that even the cheapest per-token pricing never rounds to zero."""
+
+    id: UUID
+    workspace_id: UUID
+    user_id: UUID | None
+    kind: UsageEventKind
+    model: str
+    prompt_tokens: int
+    completion_tokens: int
+    cost_microcents: int
+    generation_id: UUID | None
+    occurred_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class Budget:
+    """One row per workspace (§3.2.14). ``settled_microcents`` is
+    written only by the async metering consumer (§8 F-4: batched, not
+    per-request, to avoid hot-row contention under burst) — never
+    updated synchronously by the admission-check path itself."""
+
+    workspace_id: UUID
+    monthly_limit_microcents: int
+    soft_pct: int
+    current_period_start: date
+    settled_microcents: int
+    updated_at: datetime

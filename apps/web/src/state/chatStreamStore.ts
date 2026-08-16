@@ -12,7 +12,10 @@ export type StreamPhase =
   "submitted" | "streaming" | "settled" | "partial" | "cancelled" | "errored";
 
 interface ActiveStream {
-  generationId: string;
+  // null before a generation_id exists yet — a failure before the first
+  // SSE `meta` event (network error, a refused request such as
+  // budget_exhausted) has no generation to attach to.
+  generationId: string | null;
   threadId: string;
   phase: StreamPhase;
   content: string;
@@ -25,6 +28,10 @@ interface ChatStreamState {
   setPhase: (phase: StreamPhase) => void;
   flushContent: (content: string) => void;
   setError: (message: string) => void;
+  /** For a failure before any stream started (no `begin()` call yet) —
+   * unlike setError, this always produces a visible error state instead
+   * of silently no-oping when activeStream is still null. */
+  failBeforeStream: (threadId: string, message: string) => void;
   clear: () => void;
 }
 
@@ -54,6 +61,16 @@ export const useChatStreamStore = create<ChatStreamState>((set) => ({
         ? { activeStream: { ...state.activeStream, phase: "errored", errorMessage: message } }
         : state,
     ),
+  failBeforeStream: (threadId, message) =>
+    set({
+      activeStream: {
+        threadId,
+        generationId: null,
+        phase: "errored",
+        content: "",
+        errorMessage: message,
+      },
+    }),
   clear: () => set({ activeStream: null }),
 }));
 

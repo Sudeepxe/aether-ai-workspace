@@ -13,12 +13,15 @@ from uuid import UUID
 import asyncpg
 import redis.asyncio as redis_asyncio
 
+from aether.adapters.anthropic.completion import AnthropicCompletionAdapter
 from aether.adapters.argon2.hasher import Argon2PasswordHasher
 from aether.adapters.clock import SystemClock
 from aether.adapters.echo.generator import EchoGenerator
 from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.jwt.eddsa import EdDSATokenSigner
+from aether.adapters.openai.completion import OpenAiCompletionAdapter
 from aether.adapters.postgres.audit_log import PostgresAuditLog
+from aether.adapters.postgres.budget_repository import PostgresBudgetRepository
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
 from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
 from aether.adapters.postgres.message_repository import PostgresMessageRepository
@@ -30,6 +33,7 @@ from aether.adapters.postgres.password_reset_token_repository import (
 from aether.adapters.postgres.pool import create_pool
 from aether.adapters.postgres.refresh_token_repository import PostgresRefreshTokenRepository
 from aether.adapters.postgres.thread_repository import PostgresThreadRepository
+from aether.adapters.postgres.usage_ledger import PostgresBudgetAdmission, PostgresUsageLedger
 from aether.adapters.postgres.user_repository import PostgresUserRepository
 from aether.adapters.postgres.workspace_repository import PostgresWorkspaceRepository
 from aether.adapters.redis.cancellation import RedisCancellationChannel
@@ -51,6 +55,11 @@ from aether.app.chat.send_message import SendMessage
 from aether.app.invitations.accept_invitation import AcceptInvitation
 from aether.app.invitations.create_invitation import CreateInvitation
 from aether.app.invitations.revoke_invitation import RevokeInvitation
+from aether.app.llm.circuit_breaker import CircuitBreaker
+from aether.app.llm.router import LlmRouter
+from aether.app.metering.get_budget import GetBudget
+from aether.app.metering.get_usage import GetUsage
+from aether.app.metering.update_budget import UpdateBudget
 from aether.app.password_reset.request_password_reset import RequestPasswordReset
 from aether.app.password_reset.reset_password import ResetPassword
 from aether.app.threads.create_thread import CreateThread
@@ -67,6 +76,8 @@ from aether.app.workspaces.update_workspace import UpdateWorkspace
 from aether.config import Settings
 from aether.ports.audit import AuditLogPort
 from aether.ports.chat import GeneratorPort, MessageStorePort
+from aether.ports.llm import ProviderAdapterPort
+from aether.ports.metering import BudgetAdmissionPort, BudgetRepositoryPort, UsageLedgerPort
 from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.rate_limit import RateLimitPort
 from aether.ports.repositories import (
@@ -118,6 +129,13 @@ class Container:
     generator: GeneratorPort
     stream_buffer: StreamBufferPort
     cancellation: CancellationPort
+    budget_admission: BudgetAdmissionPort
+    usage_ledger: UsageLedgerPort
+    """Both pool-bound — see ports.metering's module docstring. Settlement
+    (usage_ledger.record) is called directly by SendMessage after a
+    successful generation, not via a separate worker consumer — see
+    adapters.postgres.usage_ledger's module docstring for why per-event,
+    same-request settlement is still correct."""
 
     register_user: RegisterUser
     login_user: LoginUser
@@ -129,8 +147,11 @@ class Container:
     send_message: SendMessage
     cancel_generation: CancelGeneration
     get_generation_status: GetGenerationStatus
+    get_usage: GetUsage
 
     refresh_ttl_seconds: int
+    default_workspace_monthly_budget_microcents: int
+    default_budget_soft_pct: int
 
     async def aclose(self) -> None:
         await self.db_pool.close()
@@ -155,6 +176,7 @@ class WorkspaceScope:
     invitations: InvitationRepositoryPort
     threads: ThreadRepositoryPort
     messages: MessageRepositoryPort
+    budgets: BudgetRepositoryPort
     audit_log: AuditLogPort
     outbox: OutboxRepositoryPort
 
@@ -172,6 +194,8 @@ class WorkspaceScope:
     update_thread: UpdateThread
     delete_thread: DeleteThread
     list_messages: ListMessages
+    get_budget: GetBudget
+    update_budget: UpdateBudget
 
 
 def build_workspace_scope(
@@ -186,6 +210,7 @@ def build_workspace_scope(
     invitations = PostgresInvitationRepository(conn)
     threads = PostgresThreadRepository(conn)
     messages = PostgresMessageRepository(conn)
+    budgets = PostgresBudgetRepository(conn)
     audit_log = PostgresAuditLog(conn)
     outbox = PostgresOutboxRepository(conn)
     return WorkspaceScope(
@@ -196,6 +221,7 @@ def build_workspace_scope(
         invitations=invitations,
         threads=threads,
         messages=messages,
+        budgets=budgets,
         audit_log=audit_log,
         outbox=outbox,
         get_workspace=GetWorkspace(workspaces=workspaces),
@@ -216,6 +242,8 @@ def build_workspace_scope(
         update_thread=UpdateThread(threads=threads),
         delete_thread=DeleteThread(threads=threads, clock=clock),
         list_messages=ListMessages(messages=messages),
+        get_budget=GetBudget(budgets=budgets),
+        update_budget=UpdateBudget(budgets=budgets, audit_log=audit_log, ids=ids),
     )
 
 
@@ -252,15 +280,30 @@ async def resolve_caller_membership(
     return await PostgresMembershipRepository(conn).get(workspace_id, user_id)
 
 
-def build_create_workspace_use_case(conn: asyncpg.Connection, *, ids: IdPort) -> CreateWorkspace:
+def build_create_workspace_use_case(
+    conn: asyncpg.Connection,
+    *,
+    clock: ClockPort,
+    ids: IdPort,
+    default_monthly_budget_microcents: int,
+    default_budget_soft_pct: int,
+) -> CreateWorkspace:
     """CreateWorkspace is the one workspace-mutation with no existing
     tenant to scope a connection to beforehand — see
     http/deps.py's get_new_workspace_connection."""
     workspaces = PostgresWorkspaceRepository(conn)
     memberships = PostgresMembershipRepository(conn)
+    budgets = PostgresBudgetRepository(conn)
     audit_log = PostgresAuditLog(conn)
     return CreateWorkspace(
-        workspaces=workspaces, memberships=memberships, audit_log=audit_log, ids=ids
+        workspaces=workspaces,
+        memberships=memberships,
+        budgets=budgets,
+        audit_log=audit_log,
+        clock=clock,
+        ids=ids,
+        default_monthly_budget_microcents=default_monthly_budget_microcents,
+        default_budget_soft_pct=default_budget_soft_pct,
     )
 
 
@@ -306,9 +349,13 @@ async def build_container(settings: Settings) -> Container:
     revoke_user_sessions = RevokeUserSessions(refresh_tokens=refresh_tokens, clock=clock)
 
     message_store = PostgresMessageStore(db_pool)
-    generator = EchoGenerator()
+    generator = _build_generator(settings, clock=clock)
     stream_buffer = RedisStreamBuffer(redis_client)
     cancellation = RedisCancellationChannel(redis_client)
+    budget_admission = PostgresBudgetAdmission(
+        db_pool, global_monthly_budget_microcents=settings.global_monthly_budget_microcents
+    )
+    usage_ledger = PostgresUsageLedger(db_pool)
 
     return Container(
         db_pool=db_pool,
@@ -329,6 +376,8 @@ async def build_container(settings: Settings) -> Container:
         generator=generator,
         stream_buffer=stream_buffer,
         cancellation=cancellation,
+        budget_admission=budget_admission,
+        usage_ledger=usage_ledger,
         register_user=RegisterUser(users=users, hasher=hasher, audit_log=audit_log, ids=ids),
         login_user=LoginUser(
             users=users,
@@ -377,9 +426,51 @@ async def build_container(settings: Settings) -> Container:
             generator=generator,
             buffer=stream_buffer,
             cancellation=cancellation,
+            admission=budget_admission,
+            usage_ledger=usage_ledger,
             ids=ids,
+            max_tokens=settings.router_max_tokens,
+            ceiling_cost_per_1k_microcents=settings.admission_ceiling_cost_per_1k_microcents,
         ),
         cancel_generation=CancelGeneration(cancellation=cancellation),
         get_generation_status=GetGenerationStatus(buffer=stream_buffer),
+        get_usage=GetUsage(usage_ledger=usage_ledger),
         refresh_ttl_seconds=settings.jwt_refresh_ttl_seconds,
+        default_workspace_monthly_budget_microcents=settings.default_workspace_monthly_budget_microcents,
+        default_budget_soft_pct=settings.default_budget_soft_pct,
+    )
+
+
+def _build_generator(settings: Settings, *, clock: ClockPort) -> GeneratorPort:
+    """Real providers only if configured (§3.2.4, issue #38) — dev/CI
+    environments without SOPS-decrypted API keys fall back to
+    EchoGenerator, exactly as S3 shipped. This is a real, honest
+    fallback, not a silent stub: the meta event's ``model`` field always
+    reflects which generator actually answered (see GeneratorPort.primary_model)."""
+    provider_configs: list[tuple[str, str, ProviderAdapterPort]] = []
+    if settings.openai_api_key:
+        provider_configs.append(
+            ("openai", "gpt-4o-mini", OpenAiCompletionAdapter(api_key=settings.openai_api_key))
+        )
+    if settings.anthropic_api_key:
+        provider_configs.append(
+            (
+                "anthropic",
+                "claude-haiku-4-5",
+                AnthropicCompletionAdapter(api_key=settings.anthropic_api_key),
+            )
+        )
+    if not provider_configs:
+        return EchoGenerator()
+
+    providers: dict[str, ProviderAdapterPort] = {
+        name: adapter for name, _, adapter in provider_configs
+    }
+    breakers = {name: CircuitBreaker(clock=clock) for name, _, _ in provider_configs}
+    model_chain = [(name, model) for name, model, _ in provider_configs]
+    return LlmRouter(
+        providers=providers,
+        breakers=breakers,
+        model_chain=model_chain,
+        max_tokens=settings.router_max_tokens,
     )

@@ -8,7 +8,7 @@ API_DIR := apps/api
 WEB_DIR := apps/web
 COMPOSE := docker compose -f infra/compose/compose.yml
 
-.PHONY: help bootstrap dev down lint typecheck test build clean env-check secrets-edit
+.PHONY: help bootstrap dev down lint typecheck test build clean env-check secrets-edit secrets-env
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -62,6 +62,9 @@ env-check: ## Fail if .env has keys missing from .env.example (drift guard)
 
 secrets-edit: ## Edit encrypted secrets bundle (SOPS + age, ADR-7.5)
 	sops infra/secrets/dev.enc.yaml
+
+secrets-env: ## Print `export KEY=value` lines decrypted from the secrets bundle — eval this into your shell, never pipe its output anywhere logged
+	@sops -d --output-type dotenv --input-type yaml infra/secrets/dev.enc.yaml | grep -v '^#' | sed 's/^/export /'
 
 clean: ## Remove caches and build artifacts
 	rm -rf $(API_DIR)/.venv $(API_DIR)/.mypy_cache $(API_DIR)/.ruff_cache $(API_DIR)/.pytest_cache
