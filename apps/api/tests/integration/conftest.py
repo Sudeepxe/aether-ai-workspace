@@ -41,6 +41,11 @@ MAILPIT_IMAGE = (
 )
 # Same digest as infra/compose/compose.yml's minio service.
 MINIO_IMAGE = "minio/minio:RELEASE.2024-08-17T01-24-54Z@sha256:6f23072e3e222e64fe6f86b31a7f7aca971e5129e55cbccef649b109b8e651a1"
+# No arm64 build published — dev machines on Apple Silicon need explicit
+# amd64 emulation; CI's amd64 runners get the same image natively.
+CLAMAV_IMAGE = (
+    "clamav/clamav@sha256:7173cd3d57a839c6fee673b07246301e0d1f68f5a14a5ca063f502323bf1cc61"
+)
 
 
 @pytest.fixture(scope="session")
@@ -73,6 +78,19 @@ async def db_pool(postgres_url: str) -> AsyncIterator[asyncpg.Pool]:
     done by db_bootstrap_pool's teardown instead, not this fixture's."""
     app_api_url = _as_role(postgres_url, "app_api", "app-api-dev-only")
     pool = await asyncpg.create_pool(app_api_url, min_size=1, max_size=4, init=_init_connection)
+    try:
+        yield pool
+    finally:
+        await pool.close()
+
+
+@pytest.fixture()
+async def worker_db_pool(postgres_url: str) -> AsyncIterator[asyncpg.Pool]:
+    """A pool connected as app_worker — the role the running worker
+    process uses (least-privileged, RLS-subject, distinct grants from
+    app_api — e.g. it can write chunk content but never delete it)."""
+    app_worker_url = _as_role(postgres_url, "app_worker", "app-worker-dev-only")
+    pool = await asyncpg.create_pool(app_worker_url, min_size=1, max_size=4, init=_init_connection)
     try:
         yield pool
     finally:
@@ -151,6 +169,26 @@ async def object_storage(minio_endpoint: tuple[str, str, str]) -> MinioObjectSto
     )
     await storage.ensure_bucket()
     return storage
+
+
+@pytest.fixture(scope="session")
+def clamav_endpoint() -> Iterator[tuple[str, int]]:
+    """Real clamd — startup is genuinely slow (it loads the full virus
+    signature database into memory on boot, independent of any network
+    call), hence session scope: pay this once, not per test. Disables
+    the freshclamd background-update daemon (CLAMAV_NO_FRESHCLAMD) since
+    tests only need EICAR-level detection, not the latest signatures —
+    skipping the live update check removes one source of CI flakiness
+    (a slow/unreachable update mirror) without weakening what's tested."""
+    with (
+        DockerContainer(CLAMAV_IMAGE, platform="linux/amd64")
+        .with_env("CLAMAV_NO_FRESHCLAMD", "true")
+        .with_exposed_ports(3310)
+    ) as container:
+        wait_for_logs(container, "socket found, clamd started", timeout=180)
+        host = container.get_container_host_ip()
+        port = int(container.get_exposed_port(3310))
+        yield host, port
 
 
 @pytest.fixture()

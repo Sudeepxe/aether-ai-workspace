@@ -49,3 +49,11 @@ class ObjectStoragePort(Protocol):
         (matches FR-KB-5's provable-deletion posture — a delete must be
         safely retryable, never blocked by "it's already gone")."""
         ...
+
+    async def download(self, *, key: str) -> bytes:
+        """Reads an object's bytes directly — worker-only (ADR-3.8's
+        "file bytes never transit the API tier" is about the API tier
+        specifically; the ingestion pipeline's worker process is the one
+        place that legitimately needs the actual bytes to scan/parse
+        them)."""
+        ...

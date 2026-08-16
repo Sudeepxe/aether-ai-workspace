@@ -116,3 +116,23 @@ async def test_delete_removes_the_object_and_is_idempotent(
     assert await object_storage.object_exists(key=key) is False
 
     await object_storage.delete(key=key)  # deleting an already-gone key must not raise
+
+
+async def test_download_returns_the_exact_uploaded_bytes(
+    object_storage: MinioObjectStorage,
+) -> None:
+    """Worker-only method (ADR-3.8: the API tier never reads file bytes
+    directly, but the ingestion pipeline's worker process must)."""
+    key = f"test/{uuid.uuid4()}.bin"
+    content = bytes(range(256)) * 100  # binary content, not just text
+    presigned = object_storage.presign_upload(
+        key=key,
+        content_type="application/octet-stream",
+        max_size_bytes=len(content) + 10,
+        expires_seconds=900,
+    )
+    _upload(presigned, content=content, content_type="application/octet-stream")
+
+    downloaded = await object_storage.download(key=key)
+
+    assert downloaded == content

@@ -78,6 +78,17 @@ class MinioObjectStorage:
         # NoSuchKey handling needed here, unlike object_exists.
         await asyncio.to_thread(self._client.remove_object, self._bucket, key)
 
+    async def download(self, *, key: str) -> bytes:
+        def _get() -> bytes:
+            response = self._client.get_object(self._bucket, key)
+            try:
+                return response.read()
+            finally:
+                response.close()
+                response.release_conn()
+
+        return await asyncio.to_thread(_get)
+
     async def ensure_bucket(self) -> None:
         """Idempotent bucket provisioning, called once at process
         startup — dev MinIO starts with no buckets; a real cloud profile
