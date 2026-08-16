@@ -14,6 +14,7 @@ loop below for the exact rule.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
 from aether.app.llm.circuit_breaker import CircuitBreaker
@@ -32,6 +33,7 @@ from aether.ports.llm import (
 
 _SYSTEM_PROMPT = "You are Aether, a helpful AI assistant."
 _DEFAULT_MAX_TOKENS = 1024
+_DEFAULT_MAX_CONCURRENT_PER_PROVIDER = 4
 _HISTORY_ROLE_MAP = {
     MessageRole.USER: LlmMessageRole.USER,
     MessageRole.ASSISTANT: LlmMessageRole.ASSISTANT,
@@ -47,14 +49,27 @@ class LlmRouter:
         breakers: dict[str, CircuitBreaker],
         model_chain: list[tuple[str, str]],
         max_tokens: int = _DEFAULT_MAX_TOKENS,
+        max_concurrent_per_provider: int = _DEFAULT_MAX_CONCURRENT_PER_PROVIDER,
     ) -> None:
         """``model_chain`` is an ordered list of (provider_name, model)
         pairs — the fallback order. ``providers``/``breakers`` must have
-        an entry for every provider_name that appears in it."""
+        an entry for every provider_name that appears in it.
+
+        ``max_concurrent_per_provider`` bounds how many generations may
+        be in flight against any one provider at once (issue #36): one
+        tenant's burst must not be able to saturate a provider's own
+        connection pool for every other tenant sharing it. A semaphore
+        acquired for a request's *entire* streaming duration, not just
+        its initial call — the thing being bounded is concurrent
+        in-flight generations, not concurrent call starts."""
         self._providers = providers
         self._breakers = breakers
         self._model_chain = model_chain
         self._max_tokens = max_tokens
+        self._semaphores = {
+            provider_name: asyncio.Semaphore(max_concurrent_per_provider)
+            for provider_name in providers
+        }
         self._capabilities: dict[tuple[str, str], ProviderCapability] = {
             (provider_name, cap.model): cap
             for provider_name, provider in providers.items()
@@ -87,25 +102,29 @@ class LlmRouter:
             responded = False
             text_sent = False
             try:
-                async for chunk in provider.stream_completion(request):
-                    if not responded:
-                        breaker.record_success()
-                        responded = True
-                    if isinstance(chunk, ProviderUsage):
-                        capability = self._capabilities[(provider_name, model)]
-                        yield GenerationUsage(
-                            prompt_tokens=chunk.prompt_tokens,
-                            completion_tokens=chunk.completion_tokens,
-                            cost_microcents=_cost_microcents(
-                                capability,
+                # Held for the whole streaming duration, not just the
+                # call's start — bounds concurrent in-flight generations
+                # against this provider, not concurrent call attempts.
+                async with self._semaphores[provider_name]:
+                    async for chunk in provider.stream_completion(request):
+                        if not responded:
+                            breaker.record_success()
+                            responded = True
+                        if isinstance(chunk, ProviderUsage):
+                            capability = self._capabilities[(provider_name, model)]
+                            yield GenerationUsage(
                                 prompt_tokens=chunk.prompt_tokens,
                                 completion_tokens=chunk.completion_tokens,
-                            ),
-                            model=model,
-                        )
-                    else:
-                        text_sent = True
-                        yield chunk
+                                cost_microcents=_cost_microcents(
+                                    capability,
+                                    prompt_tokens=chunk.prompt_tokens,
+                                    completion_tokens=chunk.completion_tokens,
+                                ),
+                                model=model,
+                            )
+                        else:
+                            text_sent = True
+                            yield chunk
                 return
             except ProviderError as exc:
                 if text_sent:

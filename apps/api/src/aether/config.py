@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     # gpt-4o-mini) — update this if a pricier model chain is added.
     admission_ceiling_cost_per_1k_microcents: int = 60_000
     router_max_tokens: int = 1024
+    # Bounds concurrent in-flight generations against any one provider
+    # (issue #36): one tenant's burst must not saturate a shared
+    # provider connection pool for every other tenant.
+    router_max_concurrent_per_provider: int = 4
 
 
 @lru_cache(maxsize=1)
