@@ -19,7 +19,9 @@ from aether.adapters.clock import SystemClock
 from aether.adapters.echo.generator import EchoGenerator
 from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.jwt.eddsa import EdDSATokenSigner
+from aether.adapters.llm.query_rewrite import LlmQueryRewriteAdapter
 from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
+from aether.adapters.local.noop_query_rewrite import NoOpQueryRewriteAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.openai.completion import OpenAiCompletionAdapter
 from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
@@ -73,6 +75,7 @@ from aether.app.metering.update_budget import UpdateBudget
 from aether.app.password_reset.request_password_reset import RequestPasswordReset
 from aether.app.password_reset.reset_password import ResetPassword
 from aether.app.retrieval.hybrid_search import HybridSearch
+from aether.app.retrieval.query_rewrite import QueryRewriter
 from aether.app.threads.create_thread import CreateThread
 from aether.app.threads.delete_thread import DeleteThread
 from aether.app.threads.get_thread import GetThread
@@ -91,6 +94,7 @@ from aether.ports.embedding import EmbeddingProviderPort
 from aether.ports.llm import ProviderAdapterPort
 from aether.ports.metering import BudgetAdmissionPort, BudgetRepositoryPort, UsageLedgerPort
 from aether.ports.outbox import OutboxRepositoryPort
+from aether.ports.query_rewrite import QueryRewritePort
 from aether.ports.rate_limit import RateLimitPort
 from aether.ports.repositories import (
     DocumentRepositoryPort,
@@ -158,6 +162,10 @@ class Container:
     same real-OpenAI-if-configured/local-hash-fallback-otherwise
     pattern, but embedding a query is a synchronous request-path
     concern, not a pipeline-stage one."""
+    query_rewriter: QueryRewritePort
+    """Real cheap-model rewrite if a provider key is configured, else
+    NoOpQueryRewriteAdapter (issue #57) — same honest-fallback pattern
+    as embedder/generator."""
 
     register_user: RegisterUser
     login_user: LoginUser
@@ -226,6 +234,7 @@ class WorkspaceScope:
     delete_document: DeleteDocument
     chunk_search: ChunkSearchPort
     hybrid_search: HybridSearch
+    query_rewriter: QueryRewriter
 
 
 def build_workspace_scope(
@@ -236,6 +245,7 @@ def build_workspace_scope(
     ids: IdPort,
     object_storage: ObjectStoragePort,
     embedder: EmbeddingProviderPort,
+    query_rewrite: QueryRewritePort,
 ) -> WorkspaceScope:
     workspaces = PostgresWorkspaceRepository(conn)
     memberships = PostgresMembershipRepository(conn)
@@ -288,6 +298,7 @@ def build_workspace_scope(
         delete_document=DeleteDocument(documents=documents, outbox=outbox, clock=clock, ids=ids),
         chunk_search=chunk_search,
         hybrid_search=HybridSearch(chunk_search=chunk_search, embedder=embedder),
+        query_rewriter=QueryRewriter(rewriter=query_rewrite),
     )
 
 
@@ -300,6 +311,7 @@ async def resolve_workspace_scope(
     ids: IdPort,
     object_storage: ObjectStoragePort,
     embedder: EmbeddingProviderPort,
+    query_rewrite: QueryRewritePort,
 ) -> WorkspaceScope | None:
     """Looks up the caller's membership under ``conn`` (which must already
     have ``app.tenant_id`` set to ``workspace_id`` — see
@@ -318,6 +330,7 @@ async def resolve_workspace_scope(
         ids=ids,
         object_storage=object_storage,
         embedder=embedder,
+        query_rewrite=query_rewrite,
     )
 
 
@@ -424,6 +437,7 @@ async def build_container(settings: Settings) -> Container:
         bucket=settings.object_storage_bucket,
     )
     embedder = _build_embedder(settings)
+    query_rewriter = _build_query_rewriter(settings)
 
     return Container(
         db_pool=db_pool,
@@ -448,6 +462,7 @@ async def build_container(settings: Settings) -> Container:
         usage_ledger=usage_ledger,
         object_storage=object_storage,
         embedder=embedder,
+        query_rewriter=query_rewriter,
         register_user=RegisterUser(users=users, hasher=hasher, audit_log=audit_log, ids=ids),
         login_user=LoginUser(
             users=users,
@@ -558,3 +573,23 @@ def _build_embedder(settings: Settings) -> EmbeddingProviderPort:
     if settings.openai_api_key:
         return OpenAiEmbeddingAdapter(api_key=settings.openai_api_key)
     return LocalHashEmbeddingAdapter()
+
+
+def _build_query_rewriter(settings: Settings) -> QueryRewritePort:
+    """Real cheap-model rewrite only if a provider key is configured
+    (issue #57, mirrors _build_embedder/_build_generator's pattern) —
+    a plain ProviderAdapterPort call, not routed through LlmRouter's
+    fallback-chain/circuit-breaker machinery: a failed rewrite already
+    falls back to the raw query one layer up (app/retrieval/
+    query_rewrite.py), so retrying here would just spend the 150ms
+    budget on something the caller is about to give up on anyway."""
+    if settings.openai_api_key:
+        return LlmQueryRewriteAdapter(
+            provider=OpenAiCompletionAdapter(api_key=settings.openai_api_key), model="gpt-4o-mini"
+        )
+    if settings.anthropic_api_key:
+        return LlmQueryRewriteAdapter(
+            provider=AnthropicCompletionAdapter(api_key=settings.anthropic_api_key),
+            model="claude-haiku-4-5",
+        )
+    return NoOpQueryRewriteAdapter()

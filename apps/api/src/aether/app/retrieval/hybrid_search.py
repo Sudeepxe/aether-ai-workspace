@@ -57,8 +57,19 @@ class HybridSearch:
         self._embedder = embedder
 
     async def search(
-        self, workspace_id: UUID, *, query: str, k: int = _DEFAULT_K
+        self,
+        workspace_id: UUID,
+        *,
+        query: str,
+        lexical_queries: list[str] | None = None,
+        k: int = _DEFAULT_K,
     ) -> RetrievalResult:
+        """``query`` feeds the vector leg. ``lexical_queries`` feeds the
+        lexical leg — defaults to ``[query]`` when not given (a single
+        query feeding both legs, issue #56's original behavior);
+        dual-feed query rewriting (issue #57) passes both the raw and
+        rewritten queries here so the lexical leg sees both while the
+        vector leg only ever sees the (already condensed) ``query``."""
         (query_embedding,) = await self._embedder.embed_batch([query])
 
         degraded = False
@@ -73,11 +84,14 @@ class HybridSearch:
             vector_results = []
             degraded = True
 
-        lexical_results = await self._chunk_search.search_lexical(
-            workspace_id, query=query, limit=_LEXICAL_LEG_LIMIT
-        )
+        lexical_result_lists = [
+            await self._chunk_search.search_lexical(
+                workspace_id, query=lexical_query, limit=_LEXICAL_LEG_LIMIT
+            )
+            for lexical_query in (lexical_queries or [query])
+        ]
 
-        fused = _reciprocal_rank_fusion(vector_results, lexical_results)
+        fused = _reciprocal_rank_fusion(vector_results, *lexical_result_lists)
         selected = _mmr_select(fused[:_MMR_CANDIDATE_POOL], k=k)
         return RetrievalResult(chunks=selected, degraded=degraded)
 
