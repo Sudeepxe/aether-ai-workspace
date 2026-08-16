@@ -8,26 +8,27 @@ refusal. Built end-to-end by one engineer as an architecture-first flagship:
 the AI features are one subsystem inside a real production application
 (auth, tenancy, budgets, audit, observability, DR) — not the whole app.
 
-> **Status: Sprint 4 — Router & Budgets complete.** Sprints 0–3 (factory;
-> identity & forced row-level-security tenant isolation; workspace/membership/
-> invitation CRUD, RBAC, audit logging, email, rate limiting; the real-time
-> streaming spine with cross-replica resume/cancel) are merged to `main`.
-> Sprint 4 replaces the Sprint 3 echo placeholder with a real LLM Router —
-> OpenAI/Anthropic provider adapters normalized to one internal stream
-> schema, per-provider circuit breakers, fallback-chain routing, and
-> per-provider concurrency semaphores (one tenant's burst can't saturate a
-> shared provider connection pool) — plus a usage ledger and hybrid budget
-> admission/settlement model: a pre-request ceiling-estimate check (global
-> $50/mo kill switch + per-workspace budgets, fail-closed on an unconfigured
-> budget) refuses a request with 429 `budget_exhausted` before any provider
-> call, and real post-generation cost settles from the provider's own
-> authoritative token counts, not a local estimate. `GET /usage` and
-> `GET/PUT /budget` (ETag, Admin-only PUT) plus a frontend usage indicator
-> round out the surface. Real API keys aren't provisioned yet, so the app
-> still runs on the Sprint 3 echo generator in dev/CI by default — the
-> Router activates automatically the moment `AETHER_OPENAI_API_KEY`/
-> `AETHER_ANTHROPIC_API_KEY` are set, no code change required. This README
-> is honest about state: no fake badges, no aspirational numbers.
+> **Status: Sprint 5 — Ingestion complete.** Sprints 0–4 (factory; identity &
+> forced row-level-security tenant isolation; workspace/membership/invitation
+> CRUD, RBAC, audit logging, email, rate limiting; the real-time streaming
+> spine with cross-replica resume/cancel; the LLM Router with usage/budget
+> admission) are merged to `main`. Sprint 5 builds the full knowledge-base
+> ingestion pipeline end to end: a `documents`/`chunks` schema (pgvector,
+> forced RLS, structure-aware provenance) → presigned-POST object storage →
+> a per-tenant fair-queued Redis Streams consumer (round-robin scheduling so
+> one tenant's bulk upload can't starve another's single job, NFR-S-2) → the
+> real pipeline handler (real ClamAV malware scan, magic-byte type
+> detection, per-format parsers for PDF/DOCX/MD/HTML/TXT, ADR-6.2
+> structure-aware chunking) → batched embedding with a content-hash dedupe
+> cache and a transactional `EMBEDDING`→`READY` upsert → the HTTP/SPA
+> surface (presigned two-step upload, cursor-paginated list, status detail,
+> FR-KB-5 provable cascading deletion). Real OpenAI/Anthropic keys aren't
+> provisioned yet, so both the chat generator and the embedding call fall
+> back to honest, clearly-labeled local placeholders (echo completion,
+> deterministic non-semantic embeddings) in dev/CI — real providers activate
+> automatically the moment the corresponding API key is set, no code change
+> required. This README is honest about state: no fake badges, no
+> aspirational numbers.
 >
 > **Branch protection note:** required status checks on `main` are enforced
 > manually (every merge verifies all CI jobs green before squashing) rather
@@ -58,6 +59,7 @@ resume; a thin owned **LLM router** with fallback chains; and a CI-gated
 | Workspace CRUD, RBAC, audit log, email, rate limiting | live (S2) |
 | Streaming chat (SSE, cross-replica resume/cancel) + SPA | live (S3) |
 | LLM Router (OpenAI/Anthropic, breakers, fallback, concurrency limits) + usage/budget admission | live (S4) — falls back to S3's echo generator until real provider keys are provisioned |
+| Knowledge-base ingestion (schema, object storage, fair-queued pipeline, malware scan, chunking, embedding) + document CRUD & upload UI | live (S5) — falls back to a local, honest, non-semantic embedder until real provider keys are provisioned |
 | **Eval score (faithfulness / refusal)** | measured from S7 — placeholder until then, never faked |
 | One-command demo | infra: `make dev` today · full demo profile: S9–S11 |
 
