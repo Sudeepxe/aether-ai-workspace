@@ -30,6 +30,8 @@ async def test_expected_tables_exist(db_bootstrap_pool: asyncpg.Pool) -> None:
         "usage_events_2026_09",
         "budgets",
         "global_usage_counter",
+        "documents",
+        "chunks",
     } <= tables
 
 
@@ -45,7 +47,17 @@ async def test_expected_roles_exist_with_correct_bypassrls(
 
 
 @pytest.mark.parametrize(
-    "table", ["memberships", "audit_events", "threads", "messages", "usage_events", "budgets"]
+    "table",
+    [
+        "memberships",
+        "audit_events",
+        "threads",
+        "messages",
+        "usage_events",
+        "budgets",
+        "documents",
+        "chunks",
+    ],
 )
 async def test_tenant_scoped_tables_have_rls_enabled_and_forced(
     db_bootstrap_pool: asyncpg.Pool, table: str
@@ -151,3 +163,67 @@ async def test_app_api_has_no_insert_or_delete_grant_on_global_usage_counter(
         )
     privileges = {r["privilege_type"] for r in rows}
     assert privileges == {"SELECT", "UPDATE"}, f"expected SELECT+UPDATE only; got {privileges}"
+
+
+async def test_vector_extension_is_installed(db_bootstrap_pool: asyncpg.Pool) -> None:
+    async with db_bootstrap_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT extname FROM pg_extension WHERE extname = 'vector'")
+    assert row is not None
+
+
+@pytest.mark.parametrize(
+    "index_name",
+    ["chunks_embedding_hnsw_idx", "chunks_content_tsv_gin_idx", "chunks_document_idx"],
+)
+async def test_expected_chunks_indexes_exist(
+    db_bootstrap_pool: asyncpg.Pool, index_name: str
+) -> None:
+    async with db_bootstrap_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT indexname FROM pg_indexes WHERE indexname = $1", index_name
+        )
+    assert row is not None
+
+
+async def test_app_api_document_grants_exclude_delete(db_bootstrap_pool: asyncpg.Pool) -> None:
+    async with db_bootstrap_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT privilege_type FROM information_schema.role_table_grants "
+            "WHERE table_name = 'documents' AND grantee = 'app_api'"
+        )
+    privileges = {r["privilege_type"] for r in rows}
+    assert privileges == {"SELECT", "INSERT", "UPDATE"}, f"got {privileges}"
+
+
+async def test_app_worker_cannot_create_or_delete_documents(
+    db_bootstrap_pool: asyncpg.Pool,
+) -> None:
+    async with db_bootstrap_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT privilege_type FROM information_schema.role_table_grants "
+            "WHERE table_name = 'documents' AND grantee = 'app_worker'"
+        )
+    privileges = {r["privilege_type"] for r in rows}
+    assert privileges == {"SELECT", "UPDATE"}, f"got {privileges}"
+
+
+async def test_app_api_can_delete_chunks_but_not_write_content(
+    db_bootstrap_pool: asyncpg.Pool,
+) -> None:
+    async with db_bootstrap_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT privilege_type FROM information_schema.role_table_grants "
+            "WHERE table_name = 'chunks' AND grantee = 'app_api'"
+        )
+    privileges = {r["privilege_type"] for r in rows}
+    assert privileges == {"SELECT", "DELETE"}, f"got {privileges}"
+
+
+async def test_app_worker_can_write_chunks_but_not_delete(db_bootstrap_pool: asyncpg.Pool) -> None:
+    async with db_bootstrap_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT privilege_type FROM information_schema.role_table_grants "
+            "WHERE table_name = 'chunks' AND grantee = 'app_worker'"
+        )
+    privileges = {r["privilege_type"] for r in rows}
+    assert privileges == {"SELECT", "INSERT", "UPDATE"}, f"got {privileges}"
