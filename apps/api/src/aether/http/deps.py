@@ -79,7 +79,12 @@ async def get_workspace_scope(
     async with container.db_pool.acquire() as conn, conn.transaction():
         await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
         scope = await resolve_workspace_scope(
-            conn, workspace_id, session.user_id, clock=container.clock, ids=container.ids
+            conn,
+            workspace_id,
+            session.user_id,
+            clock=container.clock,
+            ids=container.ids,
+            object_storage=container.object_storage,
         )
         if scope is None:
             raise WorkspaceNotFoundError(str(workspace_id))

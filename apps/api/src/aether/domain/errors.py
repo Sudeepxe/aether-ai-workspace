@@ -102,3 +102,14 @@ class BudgetConcurrencyConflictError(DomainError):
     the current state — same posture as WorkspaceConcurrencyConflictError,
     kept as its own type since budgets and workspaces are distinct
     entities with independently evolving updated_at values."""
+
+
+class DocumentNotFoundError(DomainError):
+    """Referenced document id does not exist in this workspace (or is
+    soft-deleted)."""
+
+
+class DocumentUploadIncompleteError(DomainError):
+    """documents:confirm was called but the object storage key it names
+    doesn't actually exist yet — the client claims an upload finished
+    that the storage backend has no record of."""

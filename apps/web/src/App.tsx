@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { ChatPage } from "./routes/ChatPage";
+import { DocumentsPage } from "./routes/DocumentsPage";
 import { LoginPage } from "./routes/LoginPage";
 import { useSessionBootstrap } from "./hooks/useAuth";
 import { useAuthStore } from "./state/authStore";
@@ -48,6 +49,14 @@ function AppRoutes(): JSX.Element {
         element={
           <ProtectedRoute>
             <ChatPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/documents"
+        element={
+          <ProtectedRoute>
+            <DocumentsPage />
           </ProtectedRoute>
         }
       />

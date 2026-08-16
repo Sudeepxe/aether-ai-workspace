@@ -89,3 +89,34 @@ export interface BudgetResponse {
   settled_microcents: number;
   updated_at: string;
 }
+
+// Documents (issue #48, §4.3, FR-KB-2/5) — mirrors http/schemas/documents.py.
+export type DocumentStatus =
+  "queued" | "scanning" | "parsing" | "chunking" | "embedding" | "ready" | "failed";
+
+export interface DocumentRecord {
+  id: string;
+  workspace_id: string;
+  filename: string;
+  mime: string;
+  size_bytes: number;
+  status: DocumentStatus;
+  failure_stage: string | null;
+  failure_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentListResponse {
+  items: DocumentRecord[];
+  next_cursor: string | null;
+}
+
+export interface InitiateUploadResponse {
+  document_id: string;
+  object_key: string;
+  upload_url: string;
+  upload_fields: Record<string, string>;
+}
+
+export const TERMINAL_DOCUMENT_STATUSES: ReadonlySet<DocumentStatus> = new Set(["ready", "failed"]);

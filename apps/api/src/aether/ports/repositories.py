@@ -18,6 +18,8 @@ from uuid import UUID
 
 from aether.domain.entities import (
     AuditEvent,
+    Document,
+    DocumentStatus,
     Invitation,
     Membership,
     MembershipRole,
@@ -34,6 +36,9 @@ from aether.domain.errors import EmailAlreadyRegisteredError
 
 __all__ = [
     "AuditEvent",
+    "Document",
+    "DocumentRepositoryPort",
+    "DocumentStatus",
     "EmailAlreadyRegisteredError",
     "Invitation",
     "InvitationRepositoryPort",
@@ -195,6 +200,55 @@ class ThreadRepositoryPort(Protocol):
     async def soft_delete(
         self, workspace_id: UUID, thread_id: UUID, *, deleted_at: datetime
     ) -> None: ...
+
+
+class DocumentRepositoryPort(Protocol):
+    """API-plane document repository (§4.3, FR-KB-5) — connection-bound,
+    used only by app_api's per-request WorkspaceScope. Distinct from
+    ports.ingestion_repository.IngestionRepositoryPort, which is
+    app_worker-plane and pool-bound: the two roles have disjoint DB
+    grants (app_api: SELECT/INSERT/UPDATE on documents, SELECT/DELETE on
+    chunks; app_worker: the opposite), matching two separate ports
+    rather than one shared one."""
+
+    async def create_if_absent(
+        self,
+        *,
+        id: UUID,
+        workspace_id: UUID,
+        filename: str,
+        content_sha256: str,
+        mime: str,
+        size_bytes: int,
+        object_key: str,
+    ) -> Document | None:
+        """Inserts the row unless ``id`` already exists (ON CONFLICT DO
+        NOTHING) — makes documents:confirm safely retryable: a repeated
+        call with the same (server-generated) id returns None rather
+        than a unique-violation or a duplicate document.uploaded
+        outbox event."""
+        ...
+
+    async def get(self, workspace_id: UUID, document_id: UUID) -> Document | None: ...
+
+    async def list_by_workspace(
+        self, workspace_id: UUID, *, after: tuple[datetime, UUID] | None, limit: int
+    ) -> list[Document]:
+        """Cursor pagination on (created_at DESC, id) per ADR-4.4, newest
+        first."""
+        ...
+
+    async def delete(self, workspace_id: UUID, document_id: UUID, *, deleted_at: datetime) -> bool:
+        """FR-KB-5's provable deletion: soft-deletes the document row
+        (``deleted_at``) and hard-deletes its chunks (+ vectors, same
+        column) in the same transaction as the caller's other work
+        (WorkspaceScope's per-request transaction) — not a plain FK
+        cascade, since app_api has no DELETE grant on documents itself
+        (only app_migrator does), so the chunks removal is an explicit
+        statement here, not something a hard document delete would
+        trigger. Returns False if no live (non-deleted) document with
+        this id exists in the workspace."""
+        ...
 
 
 class MessageRepositoryPort(Protocol):
