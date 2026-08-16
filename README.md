@@ -8,18 +8,26 @@ refusal. Built end-to-end by one engineer as an architecture-first flagship:
 the AI features are one subsystem inside a real production application
 (auth, tenancy, budgets, audit, observability, DR) — not the whole app.
 
-> **Status: Sprint 3 — Streaming Spine complete.** Sprints 0–2 (factory;
+> **Status: Sprint 4 — Router & Budgets complete.** Sprints 0–3 (factory;
 > identity & forced row-level-security tenant isolation; workspace/membership/
-> invitation CRUD, RBAC, audit logging, email, rate limiting) are merged to
-> `main`. Sprint 3 adds the real-time chat pipeline end-to-end: threads/
-> messages schema with a race-free per-thread sequence, the SSE streaming
-> contract with cross-replica resume and cancellation over a shared Redis
-> buffer (proven by a real multi-replica test — two independent server
-> instances, no shared process state), an echo generator proving the
-> orchestrator before a real LLM provider exists (S4), and the SPA's first
-> real product surface — login, silent re-auth, and a streaming chat UI —
-> replacing the Sprint 0 placeholder shell. This README is honest about
-> state: no fake badges, no aspirational numbers.
+> invitation CRUD, RBAC, audit logging, email, rate limiting; the real-time
+> streaming spine with cross-replica resume/cancel) are merged to `main`.
+> Sprint 4 replaces the Sprint 3 echo placeholder with a real LLM Router —
+> OpenAI/Anthropic provider adapters normalized to one internal stream
+> schema, per-provider circuit breakers, fallback-chain routing, and
+> per-provider concurrency semaphores (one tenant's burst can't saturate a
+> shared provider connection pool) — plus a usage ledger and hybrid budget
+> admission/settlement model: a pre-request ceiling-estimate check (global
+> $50/mo kill switch + per-workspace budgets, fail-closed on an unconfigured
+> budget) refuses a request with 429 `budget_exhausted` before any provider
+> call, and real post-generation cost settles from the provider's own
+> authoritative token counts, not a local estimate. `GET /usage` and
+> `GET/PUT /budget` (ETag, Admin-only PUT) plus a frontend usage indicator
+> round out the surface. Real API keys aren't provisioned yet, so the app
+> still runs on the Sprint 3 echo generator in dev/CI by default — the
+> Router activates automatically the moment `AETHER_OPENAI_API_KEY`/
+> `AETHER_ANTHROPIC_API_KEY` are set, no code change required. This README
+> is honest about state: no fake badges, no aspirational numbers.
 >
 > **Branch protection note:** required status checks on `main` are enforced
 > manually (every merge verifies all CI jobs green before squashing) rather
@@ -48,7 +56,8 @@ resume; a thin owned **LLM router** with fallback chains; and a CI-gated
 | Coverage gate | live (S1) — 80% minimum, enforced independently on unit+architecture and on integration+security |
 | Auth & tenant isolation | live (S1) — EdDSA-JWT + rotating refresh tokens, forced RLS, three-role DB privilege model |
 | Workspace CRUD, RBAC, audit log, email, rate limiting | live (S2) |
-| Streaming chat (SSE, cross-replica resume/cancel) + SPA | live (S3) — echo generator stands in for the real LLM Router until S4 |
+| Streaming chat (SSE, cross-replica resume/cancel) + SPA | live (S3) |
+| LLM Router (OpenAI/Anthropic, breakers, fallback, concurrency limits) + usage/budget admission | live (S4) — falls back to S3's echo generator until real provider keys are provisioned |
 | **Eval score (faithfulness / refusal)** | measured from S7 — placeholder until then, never faked |
 | One-command demo | infra: `make dev` today · full demo profile: S9–S11 |
 
