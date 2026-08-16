@@ -9,7 +9,7 @@ import pytest
 from aether.app.llm.circuit_breaker import CircuitBreaker
 from aether.app.llm.router import LlmRouter
 from aether.domain.errors import NoProviderAvailableError
-from aether.ports.chat import GenerationUsage
+from aether.ports.chat import GenerationUsage, RetrievedContext, RetrievedContextChunk
 from aether.ports.llm import (
     CompletionRequest,
     ProviderCapability,
@@ -264,3 +264,67 @@ async def test_concurrency_semaphore_bounds_in_flight_requests_per_provider() ->
 
     assert tracked.max_observed_concurrency == 2
     assert tracked.current_concurrency == 0  # every semaphore slot was released
+
+
+async def test_no_context_uses_the_plain_system_prompt() -> None:
+    provider = FakeProviderAdapter(name="fake", chunks=["ok"])
+    router, _ = _router(providers={"fake": provider}, model_chain=[("fake", "fake-model")])
+
+    async for _ in router.generate(thread_history=[], user_content="hi"):
+        pass
+
+    system_message = provider.calls[0].messages[0]
+    assert system_message.content == "You are Aether, a helpful AI assistant."
+
+
+async def test_grounded_context_switches_to_the_grounded_system_prompt_with_the_context_inlined() -> (
+    None
+):
+    """ADR-6.4's Gate 2: the grounded system prompt mandates answering
+    only from context and gives the exact refusal wording — the
+    context text itself must actually be in the prompt the provider
+    receives, not just referenced."""
+    provider = FakeProviderAdapter(name="fake", chunks=["ok"])
+    router, _ = _router(providers={"fake": provider}, model_chain=[("fake", "fake-model")])
+    context = RetrievedContext(
+        chunks=[
+            RetrievedContextChunk(
+                content="Acme's pricing starts at $10/mo.",
+                document_title="pricing.md",
+                section_path="Pricing",
+            )
+        ]
+    )
+
+    async for _ in router.generate(
+        thread_history=[], user_content="what does it cost?", context=context
+    ):
+        pass
+
+    system_message = provider.calls[0].messages[0]
+    assert "answer" in system_message.content.lower()
+    assert "only" in system_message.content.lower()
+    assert (
+        "don't have information about that in the knowledge base" in system_message.content.lower()
+    )
+    assert "Acme's pricing starts at $10/mo." in system_message.content
+    assert "pricing.md" in system_message.content
+
+
+async def test_grounded_context_with_no_chunks_still_uses_the_grounded_prompt() -> None:
+    """A grounded call that legitimately found nothing (Gate 1 would
+    normally have refused before reaching here, but the generator's
+    own prompt must independently honor the protocol) — the grounded
+    prompt is still used, just with an empty context section."""
+    provider = FakeProviderAdapter(name="fake", chunks=["ok"])
+    router, _ = _router(providers={"fake": provider}, model_chain=[("fake", "fake-model")])
+    context = RetrievedContext(chunks=[])
+
+    async for _ in router.generate(thread_history=[], user_content="anything", context=context):
+        pass
+
+    system_message = provider.calls[0].messages[0]
+    assert (
+        "don't have information about that in the knowledge base" in system_message.content.lower()
+    )
+    assert system_message.content != "You are Aether, a helpful AI assistant."

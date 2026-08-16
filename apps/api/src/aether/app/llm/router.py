@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator
 from aether.app.llm.circuit_breaker import CircuitBreaker
 from aether.domain.entities import Message, MessageRole
 from aether.domain.errors import NoProviderAvailableError
-from aether.ports.chat import GenerationUsage, GeneratorChunk
+from aether.ports.chat import GenerationUsage, GeneratorChunk, RetrievedContext
 from aether.ports.llm import (
     CompletionRequest,
     LlmMessage,
@@ -32,6 +32,18 @@ from aether.ports.llm import (
 )
 
 _SYSTEM_PROMPT = "You are Aether, a helpful AI assistant."
+# ADR-6.4's Gate 2: the generation-side half of two-gate refusal — a
+# real provider's actual adherence to this instruction is the eval
+# suite's job (Sprint 7), not something this prompt alone can guarantee,
+# but the protocol itself must be unambiguous and machine-checkable in
+# principle (the exact refusal wording an eval can grep for).
+_GROUNDED_SYSTEM_PROMPT = (
+    "You are Aether, a helpful AI assistant answering questions using only "
+    "the context provided below. Answer strictly from this context — never "
+    "from outside knowledge. If the context does not contain the answer, "
+    "reply with exactly: \"I don't have information about that in the "
+    'knowledge base." and nothing else.\n\nContext:\n{context}'
+)
 _DEFAULT_MAX_TOKENS = 1024
 _DEFAULT_MAX_CONCURRENT_PER_PROVIDER = 4
 _HISTORY_ROLE_MAP = {
@@ -81,9 +93,13 @@ class LlmRouter:
         return self._model_chain[0][1]
 
     async def generate(
-        self, *, thread_history: list[Message], user_content: str
+        self,
+        *,
+        thread_history: list[Message],
+        user_content: str,
+        context: RetrievedContext | None = None,
     ) -> AsyncIterator[GeneratorChunk]:
-        messages = _build_messages(thread_history, user_content)
+        messages = _build_messages(thread_history, user_content, context)
         last_error: Exception | None = None
 
         for provider_name, model in self._model_chain:
@@ -150,12 +166,27 @@ def _cost_microcents(
     return prompt_cost + completion_cost
 
 
-def _build_messages(thread_history: list[Message], user_content: str) -> list[LlmMessage]:
+def _build_messages(
+    thread_history: list[Message], user_content: str, context: RetrievedContext | None
+) -> list[LlmMessage]:
     history = [
         LlmMessage(role=_HISTORY_ROLE_MAP[m.role], content=m.content) for m in thread_history
     ]
+    system_prompt = _SYSTEM_PROMPT if context is None else _render_grounded_prompt(context)
     return [
-        LlmMessage(role=LlmMessageRole.SYSTEM, content=_SYSTEM_PROMPT),
+        LlmMessage(role=LlmMessageRole.SYSTEM, content=system_prompt),
         *history,
         LlmMessage(role=LlmMessageRole.USER, content=user_content),
     ]
+
+
+def _render_grounded_prompt(context: RetrievedContext) -> str:
+    context_text = (
+        "\n\n".join(
+            f"[{chunk.document_title} > {chunk.section_path}]\n{chunk.content}"
+            for chunk in context.chunks
+        )
+        if context.chunks
+        else "(no relevant context was found)"
+    )
+    return _GROUNDED_SYSTEM_PROMPT.format(context=context_text)
