@@ -2,10 +2,13 @@
 
 Sprint 0 shipped the process skeleton (start/log/graceful-shutdown, no
 consumer). Sprint 2 adds the first real one: polling the transactional
-outbox for pending emails (ADR-11.1). The Redis-Streams-based queue
-consumers for the conversation/ingestion planes are still correctly
-deferred to S5 — this is a narrower, already-needed mechanism, not that
-one arriving early.
+outbox for pending emails (ADR-11.1). Sprint 5 adds the outbox->
+ingestion-queue dispatcher (relaying document.uploaded rows into the
+per-tenant fair-queued Redis Streams consumer group) — real,
+self-contained infrastructure even though nothing produces that event
+type until issue #48 lands. The queue's own *consumer* loop
+(claim -> process -> ack/fail) isn't started here yet: there's no real
+document-processing handler until issue #46 exists to plug in.
 """
 
 from __future__ import annotations
@@ -47,6 +50,13 @@ async def _run_async() -> None:
                     "email_outbox_dispatch_cycle",
                     dispatched=result.dispatched,
                     failed=result.failed,
+                )
+            ingestion_result = await container.dispatch_ingestion_outbox.execute()
+            if ingestion_result.dispatched or ingestion_result.failed:
+                log.info(
+                    "ingestion_outbox_dispatch_cycle",
+                    dispatched=ingestion_result.dispatched,
+                    failed=ingestion_result.failed,
                 )
             try:
                 await asyncio.wait_for(stop.wait(), timeout=_POLL_INTERVAL_SECONDS)
