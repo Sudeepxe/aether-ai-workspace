@@ -20,9 +20,11 @@ import pytest
 import redis.asyncio as redis_asyncio
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
+from testcontainers.minio import MinioContainer
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
+from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.postgres.pool import _init_connection
 
 API_DIR = Path(__file__).resolve().parents[2]
@@ -37,6 +39,8 @@ REDIS_IMAGE = (
 MAILPIT_IMAGE = (
     "axllent/mailpit:v1.20@sha256:7eef0f38dbc85e4e264f2edf5d70fbb694826791e05cb2cae4fc9e3282f968f5"
 )
+# Same digest as infra/compose/compose.yml's minio service.
+MINIO_IMAGE = "minio/minio:RELEASE.2024-08-17T01-24-54Z@sha256:6f23072e3e222e64fe6f86b31a7f7aca971e5129e55cbccef649b109b8e651a1"
 
 
 @pytest.fixture(scope="session")
@@ -118,6 +122,35 @@ def mailpit_client(mailpit: tuple[str, int, str]) -> Iterator[httpx.Client]:
     with httpx.Client(base_url=base_url, timeout=5.0) as client:
         client.delete("/api/v1/messages")  # start each test with an empty mailbox
         yield client
+
+
+@pytest.fixture(scope="session")
+def minio_endpoint() -> Iterator[tuple[str, str, str]]:
+    """Real MinIO — yields (host:port, access_key, secret_key), same
+    credential shape as infra/compose/compose.yml's dev service."""
+    with MinioContainer(
+        MINIO_IMAGE, access_key="aether", secret_key="aether-dev-only"
+    ) as container:
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(container.port)
+        yield f"{host}:{port}", "aether", "aether-dev-only"
+
+
+@pytest.fixture()
+async def object_storage(minio_endpoint: tuple[str, str, str]) -> MinioObjectStorage:
+    """A fresh adapter per test, all sharing one session-scoped bucket —
+    tests use unique (uuid-based) keys, so no cross-test cleanup is
+    needed the way TRUNCATE handles Postgres state between tests."""
+    endpoint, access_key, secret_key = minio_endpoint
+    storage = MinioObjectStorage(
+        endpoint=endpoint,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=False,
+        bucket="aether-test-documents",
+    )
+    await storage.ensure_bucket()
+    return storage
 
 
 @pytest.fixture()

@@ -19,6 +19,7 @@ from aether.adapters.clock import SystemClock
 from aether.adapters.echo.generator import EchoGenerator
 from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.jwt.eddsa import EdDSATokenSigner
+from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.openai.completion import OpenAiCompletionAdapter
 from aether.adapters.postgres.audit_log import PostgresAuditLog
 from aether.adapters.postgres.budget_repository import PostgresBudgetRepository
@@ -93,6 +94,7 @@ from aether.ports.repositories import (
 )
 from aether.ports.revocation import RevocationPort
 from aether.ports.security import ClockPort, IdPort, PasswordHasherPort, TokenPort
+from aether.ports.storage import ObjectStoragePort
 from aether.ports.streaming import CancellationPort, StreamBufferPort
 
 
@@ -136,6 +138,7 @@ class Container:
     successful generation, not via a separate worker consumer — see
     adapters.postgres.usage_ledger's module docstring for why per-event,
     same-request settlement is still correct."""
+    object_storage: ObjectStoragePort
 
     register_user: RegisterUser
     login_user: LoginUser
@@ -356,6 +359,20 @@ async def build_container(settings: Settings) -> Container:
         db_pool, global_monthly_budget_microcents=settings.global_monthly_budget_microcents
     )
     usage_ledger = PostgresUsageLedger(db_pool)
+    # Deliberately does NOT call ensure_bucket() here: bucket
+    # provisioning is a one-time, out-of-band operational step (`make
+    # minio-setup`), matching how migrations run as a separate step
+    # from app boot rather than inside build_container() — every test
+    # that constructs a Container via create_app()/TestClient goes
+    # through this same function, and most of them have no reason to
+    # need a running MinIO at all.
+    object_storage = MinioObjectStorage(
+        endpoint=settings.object_storage_endpoint,
+        access_key=settings.object_storage_access_key,
+        secret_key=settings.object_storage_secret_key,
+        secure=settings.object_storage_secure,
+        bucket=settings.object_storage_bucket,
+    )
 
     return Container(
         db_pool=db_pool,
@@ -378,6 +395,7 @@ async def build_container(settings: Settings) -> Container:
         cancellation=cancellation,
         budget_admission=budget_admission,
         usage_ledger=usage_ledger,
+        object_storage=object_storage,
         register_user=RegisterUser(users=users, hasher=hasher, audit_log=audit_log, ids=ids),
         login_user=LoginUser(
             users=users,
