@@ -19,10 +19,13 @@ from aether.adapters.clock import SystemClock
 from aether.adapters.echo.generator import EchoGenerator
 from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.jwt.eddsa import EdDSATokenSigner
+from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.openai.completion import OpenAiCompletionAdapter
+from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
 from aether.adapters.postgres.audit_log import PostgresAuditLog
 from aether.adapters.postgres.budget_repository import PostgresBudgetRepository
+from aether.adapters.postgres.chunk_search import PostgresChunkSearch
 from aether.adapters.postgres.document_repository import PostgresDocumentRepository
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
 from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
@@ -69,6 +72,7 @@ from aether.app.metering.get_usage import GetUsage
 from aether.app.metering.update_budget import UpdateBudget
 from aether.app.password_reset.request_password_reset import RequestPasswordReset
 from aether.app.password_reset.reset_password import ResetPassword
+from aether.app.retrieval.hybrid_search import HybridSearch
 from aether.app.threads.create_thread import CreateThread
 from aether.app.threads.delete_thread import DeleteThread
 from aether.app.threads.get_thread import GetThread
@@ -83,6 +87,7 @@ from aether.app.workspaces.update_workspace import UpdateWorkspace
 from aether.config import Settings
 from aether.ports.audit import AuditLogPort
 from aether.ports.chat import GeneratorPort, MessageStorePort
+from aether.ports.embedding import EmbeddingProviderPort
 from aether.ports.llm import ProviderAdapterPort
 from aether.ports.metering import BudgetAdmissionPort, BudgetRepositoryPort, UsageLedgerPort
 from aether.ports.outbox import OutboxRepositoryPort
@@ -99,6 +104,7 @@ from aether.ports.repositories import (
     UserRepositoryPort,
     WorkspaceRepositoryPort,
 )
+from aether.ports.retrieval import ChunkSearchPort
 from aether.ports.revocation import RevocationPort
 from aether.ports.security import ClockPort, IdPort, PasswordHasherPort, TokenPort
 from aether.ports.storage import ObjectStoragePort
@@ -146,6 +152,12 @@ class Container:
     adapters.postgres.usage_ledger's module docstring for why per-event,
     same-request settlement is still correct."""
     object_storage: ObjectStoragePort
+    embedder: EmbeddingProviderPort
+    """Query-side embedding for hybrid retrieval (issue #56) — the API
+    process's own instance, distinct from the worker's (issue #47):
+    same real-OpenAI-if-configured/local-hash-fallback-otherwise
+    pattern, but embedding a query is a synchronous request-path
+    concern, not a pipeline-stage one."""
 
     register_user: RegisterUser
     login_user: LoginUser
@@ -212,6 +224,8 @@ class WorkspaceScope:
     list_documents: ListDocuments
     get_document: GetDocument
     delete_document: DeleteDocument
+    chunk_search: ChunkSearchPort
+    hybrid_search: HybridSearch
 
 
 def build_workspace_scope(
@@ -221,6 +235,7 @@ def build_workspace_scope(
     clock: ClockPort,
     ids: IdPort,
     object_storage: ObjectStoragePort,
+    embedder: EmbeddingProviderPort,
 ) -> WorkspaceScope:
     workspaces = PostgresWorkspaceRepository(conn)
     memberships = PostgresMembershipRepository(conn)
@@ -231,6 +246,7 @@ def build_workspace_scope(
     budgets = PostgresBudgetRepository(conn)
     audit_log = PostgresAuditLog(conn)
     outbox = PostgresOutboxRepository(conn)
+    chunk_search = PostgresChunkSearch(conn)
     return WorkspaceScope(
         conn=conn,
         caller_membership=caller_membership,
@@ -270,6 +286,8 @@ def build_workspace_scope(
         list_documents=ListDocuments(documents=documents),
         get_document=GetDocument(documents=documents),
         delete_document=DeleteDocument(documents=documents, outbox=outbox, clock=clock, ids=ids),
+        chunk_search=chunk_search,
+        hybrid_search=HybridSearch(chunk_search=chunk_search, embedder=embedder),
     )
 
 
@@ -281,6 +299,7 @@ async def resolve_workspace_scope(
     clock: ClockPort,
     ids: IdPort,
     object_storage: ObjectStoragePort,
+    embedder: EmbeddingProviderPort,
 ) -> WorkspaceScope | None:
     """Looks up the caller's membership under ``conn`` (which must already
     have ``app.tenant_id`` set to ``workspace_id`` — see
@@ -293,7 +312,12 @@ async def resolve_workspace_scope(
     if caller_membership is None:
         return None
     return build_workspace_scope(
-        conn, caller_membership, clock=clock, ids=ids, object_storage=object_storage
+        conn,
+        caller_membership,
+        clock=clock,
+        ids=ids,
+        object_storage=object_storage,
+        embedder=embedder,
     )
 
 
@@ -399,6 +423,7 @@ async def build_container(settings: Settings) -> Container:
         secure=settings.object_storage_secure,
         bucket=settings.object_storage_bucket,
     )
+    embedder = _build_embedder(settings)
 
     return Container(
         db_pool=db_pool,
@@ -422,6 +447,7 @@ async def build_container(settings: Settings) -> Container:
         budget_admission=budget_admission,
         usage_ledger=usage_ledger,
         object_storage=object_storage,
+        embedder=embedder,
         register_user=RegisterUser(users=users, hasher=hasher, audit_log=audit_log, ids=ids),
         login_user=LoginUser(
             users=users,
@@ -519,3 +545,16 @@ def _build_generator(settings: Settings, *, clock: ClockPort) -> GeneratorPort:
         max_tokens=settings.router_max_tokens,
         max_concurrent_per_provider=settings.router_max_concurrent_per_provider,
     )
+
+
+def _build_embedder(settings: Settings) -> EmbeddingProviderPort:
+    """Real OpenAI embeddings only if configured (mirrors workers/
+    composition.py's own ``_build_embedder``, issue #47) — dev/CI
+    environments without a SOPS-decrypted API key fall back to
+    LocalHashEmbeddingAdapter, a real and honest (if non-semantic)
+    embedder, not a silent stub. The API process needs its own instance
+    (query-time embedding for hybrid retrieval, issue #56) distinct
+    from the worker's (document-time embedding, issue #47)."""
+    if settings.openai_api_key:
+        return OpenAiEmbeddingAdapter(api_key=settings.openai_api_key)
+    return LocalHashEmbeddingAdapter()
