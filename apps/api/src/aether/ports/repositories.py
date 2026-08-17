@@ -18,6 +18,8 @@ from uuid import UUID
 
 from aether.domain.entities import (
     AuditEvent,
+    Citation,
+    CitationDraft,
     Document,
     DocumentStatus,
     Invitation,
@@ -36,6 +38,9 @@ from aether.domain.errors import EmailAlreadyRegisteredError
 
 __all__ = [
     "AuditEvent",
+    "Citation",
+    "CitationDraft",
+    "CitationRepositoryPort",
     "Document",
     "DocumentRepositoryPort",
     "DocumentStatus",
@@ -285,3 +290,23 @@ class MessageRepositoryPort(Protocol):
         """Cursor pagination on seq DESC (§8.1: seq is itself a natural,
         gapless pagination cursor — ADR-8.2)."""
         ...
+
+
+class CitationRepositoryPort(Protocol):
+    """Connection-bound (ADR-8.6) — issue #60 composes ``create_many``
+    into the same transaction as the assistant message's own persist
+    call (matching ``MessageRepositoryPort``'s sibling role to the
+    pool-bound ``ports.chat.MessageStorePort``: one connection-bound
+    port meant to be called *inside* an already-open transaction, one
+    pool-bound port that opens its own)."""
+
+    async def create_many(
+        self, workspace_id: UUID, message_id: UUID, citations: list[CitationDraft]
+    ) -> list[Citation]:
+        """Write-once: citations are never updated after creation, and
+        removal happens only as a side effect of the referenced
+        chunk's own deletion (ON DELETE SET NULL), never a direct
+        delete here."""
+        ...
+
+    async def list_by_message(self, workspace_id: UUID, message_id: UUID) -> list[Citation]: ...

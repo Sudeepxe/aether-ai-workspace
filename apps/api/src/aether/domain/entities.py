@@ -168,6 +168,42 @@ class Message:
 
 
 @dataclass(frozen=True, slots=True)
+class Citation:
+    """One grounded message's reference to a retrieved chunk (ADR-8.6,
+    §8.1). ``document_title``/``section_path``/``page_start``/
+    ``page_end`` are a provenance *snapshot*, captured once at write
+    time — not a live join to ``chunks`` — so a citation survives
+    intact even after its source document/chunk is later deleted.
+    ``chunk_id`` is nullable for exactly that reason: null means "the
+    source this once pointed to is gone" (the UI renders a "source
+    removed" state), not "this citation is broken"."""
+
+    id: UUID
+    workspace_id: UUID
+    message_id: UUID
+    chunk_id: UUID | None
+    document_title: str
+    section_path: str
+    page_start: int | None
+    page_end: int | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class CitationDraft:
+    """The input shape for creating a citation — deliberately distinct
+    from ``Citation`` (the persisted row), matching ``ChunkDraft``'s
+    precedent in this file: no id/workspace_id/message_id/created_at,
+    those are persistence concerns the repository adapter assigns."""
+
+    chunk_id: UUID | None
+    document_title: str
+    section_path: str
+    page_start: int | None
+    page_end: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class RefreshToken:
     """Represents one node in a refresh-token family (ADR-7.2).
 
