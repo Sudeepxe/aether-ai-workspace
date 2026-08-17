@@ -28,6 +28,7 @@ from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
 from aether.adapters.postgres.audit_log import PostgresAuditLog
 from aether.adapters.postgres.budget_repository import PostgresBudgetRepository
 from aether.adapters.postgres.chunk_search import PostgresChunkSearch
+from aether.adapters.postgres.citation_repository import PostgresCitationRepository
 from aether.adapters.postgres.document_repository import PostgresDocumentRepository
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
 from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
@@ -97,6 +98,7 @@ from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.query_rewrite import QueryRewritePort
 from aether.ports.rate_limit import RateLimitPort
 from aether.ports.repositories import (
+    CitationRepositoryPort,
     DocumentRepositoryPort,
     InvitationRepositoryPort,
     Membership,
@@ -206,6 +208,7 @@ class WorkspaceScope:
     invitations: InvitationRepositoryPort
     threads: ThreadRepositoryPort
     messages: MessageRepositoryPort
+    citations: CitationRepositoryPort
     documents: DocumentRepositoryPort
     budgets: BudgetRepositoryPort
     audit_log: AuditLogPort
@@ -252,6 +255,7 @@ def build_workspace_scope(
     invitations = PostgresInvitationRepository(conn)
     threads = PostgresThreadRepository(conn)
     messages = PostgresMessageRepository(conn)
+    citations = PostgresCitationRepository(conn)
     documents = PostgresDocumentRepository(conn)
     budgets = PostgresBudgetRepository(conn)
     audit_log = PostgresAuditLog(conn)
@@ -265,6 +269,7 @@ def build_workspace_scope(
         invitations=invitations,
         threads=threads,
         messages=messages,
+        citations=citations,
         documents=documents,
         budgets=budgets,
         audit_log=audit_log,
