@@ -35,6 +35,11 @@ jobs:
           uv run ruff format --check .
           uv run ruff check .
           uv run lint-imports --config pyproject.toml
+      - name: Eval harness lint + format (evals/, S7)
+        working-directory: apps/api
+        run: |
+          uv run ruff format --check ../../evals
+          uv run ruff check ../../evals
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm, cache-dependency-path: apps/web/package-lock.json }
       - name: Web lint + typecheck
@@ -46,6 +51,11 @@ jobs:
       - name: Python typecheck (mypy --strict)
         working-directory: apps/api
         run: uv run mypy
+      - name: Eval harness typecheck (evals/, S7)
+        working-directory: apps/api
+        env:
+          PYTHONPATH: ../..
+        run: uv run mypy --strict --ignore-missing-imports --explicit-package-bases ../../evals
 
   unit:
     runs-on: ubuntu-latest

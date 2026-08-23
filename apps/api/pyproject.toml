@@ -86,6 +86,11 @@ ignore = ["E501"]  # line length handled by formatter
           # opening line of an unclosed multi-line string is part of the
           # string itself, not a comment.
 ]
+"../../evals/harness/**" = [
+  "S105", # the harness's own throwaway eval-user password (runner.py) —
+          # same non-credential posture as tests/**'s fixture literals.
+  "T201", # cli.py is a human-facing CLI tool; stdout output is the point.
+]
 
 # ---------------------------------------------------------------- mypy -----
 [tool.mypy]
@@ -153,6 +158,11 @@ allow_indirect_imports = true
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 asyncio_mode = "auto"
+# Repo root on sys.path so tests/integration/test_eval_harness.py can
+# import evals.harness.* (Sprint 7's harness lives outside apps/api —
+# it's a consumer of the product, not part of it, see evals/harness/
+# __init__.py's docstring) without a separate package/dependency setup.
+pythonpath = ["../.."]
 markers = [
   "unit: fast, no I/O, fake ports only",
   "integration: real PG/Redis via testcontainers (enabled S1+)",
