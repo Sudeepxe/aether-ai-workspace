@@ -236,6 +236,49 @@ class FakeMessageStore:
         return [c for c in self._citations.get(message_id, []) if c.workspace_id == workspace_id]
 
 
+class FakeCitationRepository:
+    """Standalone CitationRepositoryPort fake — used where a test wants a
+    citation store independent of FakeMessageStore's own internal
+    bookkeeping (e.g. ListMessages, which composes both ports)."""
+
+    def __init__(self) -> None:
+        self._rows: dict[UUID, list[Citation]] = {}
+
+    def seed(self, message_id: UUID, citations: list[Citation]) -> None:
+        self._rows[message_id] = citations
+
+    async def create_many(
+        self, workspace_id: UUID, message_id: UUID, citations: list[CitationDraft]
+    ) -> list[Citation]:
+        created = [
+            Citation(
+                id=uuid4(),
+                workspace_id=workspace_id,
+                message_id=message_id,
+                chunk_id=d.chunk_id,
+                document_title=d.document_title,
+                section_path=d.section_path,
+                page_start=d.page_start,
+                page_end=d.page_end,
+                created_at=datetime.now().astimezone(),
+            )
+            for d in citations
+        ]
+        self._rows[message_id] = created
+        return created
+
+    async def list_by_message(self, workspace_id: UUID, message_id: UUID) -> list[Citation]:
+        return [c for c in self._rows.get(message_id, []) if c.workspace_id == workspace_id]
+
+    async def list_by_messages(self, workspace_id: UUID, message_ids: list[UUID]) -> list[Citation]:
+        return [
+            c
+            for message_id in message_ids
+            for c in self._rows.get(message_id, [])
+            if c.workspace_id == workspace_id
+        ]
+
+
 _DEFAULT_USAGE = GenerationUsage(
     prompt_tokens=1, completion_tokens=1, cost_microcents=100, model="fake-model"
 )

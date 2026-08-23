@@ -37,6 +37,15 @@ class SendMessageRequest(BaseModel):
     client_message_id: str = Field(min_length=1, max_length=200)
 
 
+class CitationResponse(BaseModel):
+    id: UUID
+    chunk_id: UUID | None
+    document_title: str
+    section_path: str
+    page_start: int | None
+    page_end: int | None
+
+
 class MessageResponse(BaseModel):
     id: UUID
     workspace_id: UUID
@@ -51,6 +60,7 @@ class MessageResponse(BaseModel):
     completion_tokens: int | None
     cost_microcents: int | None
     grounded: bool
+    citations: list[CitationResponse]
     created_at: datetime
 
 

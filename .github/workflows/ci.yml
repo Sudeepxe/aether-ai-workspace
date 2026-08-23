@@ -144,27 +144,32 @@ jobs:
           uv run pytest -m "integration or security" --cov --cov-append --cov-report=xml
 
   e2e:
-    # Real Postgres/Redis (dev profile) + the real API process (run
-    # directly via uv, not the Docker image — matches how `integration`
-    # already runs against real infra without a container build) + a
-    # real Chromium browser driving the real Vite dev server. Issue
-    # #28's literal acceptance criterion: login -> send message -> see
-    # the streamed echo response settle, proven against the actual
-    # wire protocol end-to-end, not mocked on either side.
+    # Real Postgres/Redis/MinIO/ClamAV (dev profile) + the real API and
+    # worker processes (run directly via uv, not the Docker image —
+    # matches how `integration` already runs against real infra without
+    # a container build) + a real Chromium browser driving the real Vite
+    # dev server. Issue #28's literal acceptance criterion (login -> send
+    # message -> see the streamed response settle) and issue #61's (a
+    # real document, uploaded through the real UI, produces a real
+    # grounded/cited chat reply) both need the full stack — MinIO/ClamAV/
+    # worker weren't needed until #61 added a real-ingestion e2e spec.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm, cache-dependency-path: apps/web/package-lock.json }
-      - name: Start dev infra (Postgres, Redis)
-        run: docker compose -f infra/compose/compose.yml --profile dev up -d --wait postgres redis
-      - name: Migrate + start the API
+      - name: Start dev infra (Postgres, Redis, MinIO, ClamAV)
+        run: |
+          docker compose -f infra/compose/compose.yml --profile dev up -d --wait \
+            postgres redis minio clamav
+      - name: Migrate, provision the bucket, and start the API + worker
         working-directory: apps/api
         env:
           AETHER_ENV: dev
           AETHER_DATABASE_URL: postgresql://app_api:app-api-dev-only@localhost:5432/aether
           AETHER_DATABASE_MIGRATOR_URL: postgresql://aether:aether-dev-only@localhost:5432/aether
+          AETHER_DATABASE_WORKER_URL: postgresql://app_worker:app-worker-dev-only@localhost:5432/aether
           AETHER_REDIS_URL: redis://localhost:6379/0
           # Dev-only key, already committed in .env.example (ADR-7.5) —
           # protects nothing outside this ephemeral CI run.
@@ -173,7 +178,19 @@ jobs:
         run: |
           uv sync
           uv run alembic upgrade head
+          uv run python -c "
+          import asyncio
+          from aether.adapters.minio.object_storage import MinioObjectStorage
+          from aether.config import get_settings
+          s = get_settings()
+          asyncio.run(MinioObjectStorage(
+              endpoint=s.object_storage_endpoint, access_key=s.object_storage_access_key,
+              secret_key=s.object_storage_secret_key, secure=s.object_storage_secure,
+              bucket=s.object_storage_bucket,
+          ).ensure_bucket())
+          "
           uv run python -m aether.http.main &
+          uv run python -m aether.workers.main &
           for i in $(seq 1 30); do
             curl -sf http://localhost:8000/readyz && exit 0
             sleep 1

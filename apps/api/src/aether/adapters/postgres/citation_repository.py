@@ -66,6 +66,18 @@ class PostgresCitationRepository:
         )
         return [_row_to_citation(row) for row in rows]
 
+    async def list_by_messages(self, workspace_id: UUID, message_ids: list[UUID]) -> list[Citation]:
+        if not message_ids:
+            return []
+        rows = await self._conn.fetch(
+            "SELECT id, workspace_id, message_id, chunk_id, document_title, section_path, "
+            "page_start, page_end, created_at FROM message_citations "
+            "WHERE workspace_id = $1 AND message_id = ANY($2::uuid[]) ORDER BY created_at",
+            workspace_id,
+            message_ids,
+        )
+        return [_row_to_citation(row) for row in rows]
+
 
 def _row_to_citation(row: asyncpg.Record) -> Citation:
     return Citation(

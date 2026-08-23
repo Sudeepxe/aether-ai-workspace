@@ -13,10 +13,10 @@ from fastapi import APIRouter, Depends, Query, status
 from aether.app.threads.create_thread import CreateThreadCommand
 from aether.app.threads.delete_thread import DeleteThreadCommand
 from aether.app.threads.get_thread import GetThreadCommand
-from aether.app.threads.list_messages import ListMessagesCommand
+from aether.app.threads.list_messages import ListMessagesCommand, MessageWithCitations
 from aether.app.threads.list_threads import ListThreadsCommand
 from aether.app.threads.update_thread import UpdateThreadCommand
-from aether.domain.entities import Message, Thread
+from aether.domain.entities import Thread
 from aether.domain.policy import CREATE_MESSAGES
 from aether.http.authz import AuthRequirement, require_capability, route_auth
 from aether.http.composition import WorkspaceScope
@@ -31,6 +31,7 @@ from aether.http.pagination import (
 )
 from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
 from aether.http.schemas.threads import (
+    CitationResponse,
     CreateThreadRequest,
     MessageListResponse,
     MessageResponse,
@@ -54,7 +55,8 @@ def _to_thread_response(thread: Thread) -> ThreadResponse:
     )
 
 
-def _to_message_response(message: Message) -> MessageResponse:
+def _to_message_response(item: MessageWithCitations) -> MessageResponse:
+    message = item.message
     return MessageResponse(
         id=message.id,
         workspace_id=message.workspace_id,
@@ -69,6 +71,17 @@ def _to_message_response(message: Message) -> MessageResponse:
         completion_tokens=message.completion_tokens,
         cost_microcents=message.cost_microcents,
         grounded=message.grounded,
+        citations=[
+            CitationResponse(
+                id=c.id,
+                chunk_id=c.chunk_id,
+                document_title=c.document_title,
+                section_path=c.section_path,
+                page_start=c.page_start,
+                page_end=c.page_end,
+            )
+            for c in item.citations
+        ],
         created_at=message.created_at,
     )
 
@@ -191,7 +204,7 @@ async def list_messages(
     )
     has_more = len(messages) > page_limit
     page = messages[:page_limit]
-    next_cursor = encode_seq_cursor(page[-1].seq) if has_more else None
+    next_cursor = encode_seq_cursor(page[-1].message.seq) if has_more else None
     return MessageListResponse(
         items=[_to_message_response(m) for m in page], next_cursor=next_cursor
     )

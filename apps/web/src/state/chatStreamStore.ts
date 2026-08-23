@@ -8,6 +8,8 @@
  */
 import { create } from "zustand";
 
+import type { Citation } from "../api/types";
+
 export type StreamPhase =
   "submitted" | "streaming" | "settled" | "partial" | "cancelled" | "errored";
 
@@ -20,13 +22,22 @@ interface ActiveStream {
   phase: StreamPhase;
   content: string;
   errorMessage: string | null;
+  // null until the `meta` event arrives (same lifecycle as generationId) —
+  // the real Gate 1 outcome (issue #60), not a guess rendered before the
+  // server has actually decided.
+  grounded: boolean | null;
+  // Filled in by `citation` SSE events as they arrive, so a grounded
+  // answer's provenance renders while it's still streaming, not only
+  // after settle + a message-list refetch.
+  citations: Citation[];
 }
 
 interface ChatStreamState {
   activeStream: ActiveStream | null;
-  begin: (threadId: string, generationId: string) => void;
+  begin: (threadId: string, generationId: string, grounded: boolean) => void;
   setPhase: (phase: StreamPhase) => void;
   flushContent: (content: string) => void;
+  addCitation: (citation: Citation) => void;
   setError: (message: string) => void;
   /** For a failure before any stream started (no `begin()` call yet) —
    * unlike setError, this always produces a visible error state instead
@@ -37,7 +48,7 @@ interface ChatStreamState {
 
 export const useChatStreamStore = create<ChatStreamState>((set) => ({
   activeStream: null,
-  begin: (threadId, generationId) =>
+  begin: (threadId, generationId, grounded) =>
     set({
       activeStream: {
         threadId,
@@ -45,6 +56,8 @@ export const useChatStreamStore = create<ChatStreamState>((set) => ({
         phase: "submitted",
         content: "",
         errorMessage: null,
+        grounded,
+        citations: [],
       },
     }),
   setPhase: (phase) =>
@@ -54,6 +67,17 @@ export const useChatStreamStore = create<ChatStreamState>((set) => ({
   flushContent: (content) =>
     set((state) =>
       state.activeStream ? { activeStream: { ...state.activeStream, content } } : state,
+    ),
+  addCitation: (citation) =>
+    set((state) =>
+      state.activeStream
+        ? {
+            activeStream: {
+              ...state.activeStream,
+              citations: [...state.activeStream.citations, citation],
+            },
+          }
+        : state,
     ),
   setError: (message) =>
     set((state) =>
@@ -69,6 +93,8 @@ export const useChatStreamStore = create<ChatStreamState>((set) => ({
         phase: "errored",
         content: "",
         errorMessage: message,
+        grounded: null,
+        citations: [],
       },
     }),
   clear: () => set({ activeStream: null }),

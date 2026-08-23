@@ -285,7 +285,7 @@ def build_workspace_scope(
         list_threads=ListThreads(threads=threads),
         update_thread=UpdateThread(threads=threads),
         delete_thread=DeleteThread(threads=threads, clock=clock),
-        list_messages=ListMessages(messages=messages),
+        list_messages=ListMessages(messages=messages, citations=citations),
         get_budget=GetBudget(budgets=budgets),
         update_budget=UpdateBudget(budgets=budgets, audit_log=audit_log, ids=ids),
         initiate_document_upload=InitiateDocumentUpload(object_storage=object_storage, ids=ids),
