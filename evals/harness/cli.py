@@ -22,6 +22,7 @@ from httpx import ASGITransport, AsyncClient
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.postgres.pool import _init_connection
 from aether.config import get_settings
+from evals.harness.judge import FaithfulnessStatus, FaithfulnessVerdict, judge_case_faithfulness
 from evals.harness.metrics import AggregateMetrics, aggregate, score_case
 from evals.harness.runner import run_golden_set
 from evals.harness.schema import load_golden_set
@@ -29,7 +30,7 @@ from evals.harness.schema import load_golden_set
 DEFAULT_GOLDEN_DIR = Path(__file__).resolve().parents[1] / "golden" / "v1"
 
 
-def _print_summary(agg: AggregateMetrics) -> None:
+def _print_summary(agg: AggregateMetrics, faithfulness: list[FaithfulnessVerdict]) -> None:
     def fmt(v: float | None) -> str:
         return "n/a" if v is None else f"{v * 100:.1f}%"
 
@@ -40,7 +41,21 @@ def _print_summary(agg: AggregateMetrics) -> None:
     print(f"citation precision:    {fmt(agg.citation_precision_mean)}")
     print(f"citation recall:       {fmt(agg.citation_recall_mean)}")
     print(f"adversarial safety:    {fmt(agg.adversarial_safety_rate)}")
-    print("faithfulness:          not measured (no LLM judge wired — issue #71)")
+    print(f"faithfulness:          {_format_faithfulness(faithfulness)}")
+
+
+def _format_faithfulness(verdicts: list[FaithfulnessVerdict]) -> str:
+    measured = [v for v in verdicts if v.status == FaithfulnessStatus.MEASURED]
+    if measured:
+        rate = sum(1 for v in measured if v.faithful) / len(measured)
+        return f"{rate * 100:.1f}% ({len(measured)} turn(s) judged)"
+    not_measured = sum(1 for v in verdicts if v.status == FaithfulnessStatus.NOT_MEASURED)
+    skipped = sum(1 for v in verdicts if v.status == FaithfulnessStatus.SKIPPED_SAME_FAMILY)
+    if skipped:
+        return f"not measured — only a same-family judge available ({skipped} turn(s) skipped)"
+    if not_measured:
+        return "not measured — no LLM provider key configured in this environment"
+    return "not measured — no grounded turns to judge"
 
 
 async def _run(golden_dir: Path) -> int:
@@ -91,13 +106,20 @@ async def _run(golden_dir: Path) -> int:
                 clamav_endpoint=clamav_endpoint,
                 log=print,
             )
+            faithfulness: list[FaithfulnessVerdict] = []
+            for result in results:
+                faithfulness.extend(
+                    await judge_case_faithfulness(
+                        result, bootstrap_pool=bootstrap_pool, settings=settings
+                    )
+                )
     finally:
         await bootstrap_pool.close()
         await worker_pool.close()
 
     case_metrics = [score_case(r) for r in results]
     agg = aggregate(case_metrics)
-    _print_summary(agg)
+    _print_summary(agg, faithfulness)
 
     failed = [c for c in case_metrics if not c.ran_successfully]
     if failed:
