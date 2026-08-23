@@ -105,18 +105,26 @@ class Settings(BaseSettings):
     clamav_host: str = "localhost"
     clamav_port: int = 3310
 
-    # --- Grounded chat refusal (Sprint 6, ADR-6.4) -------------------------
-    # Gate 1's retrieval-score threshold: the ADR is explicit this must be
-    # "calibrated per embedding model on the golden set", never treated as
-    # a fixed constant — Sprint 7's golden set/eval harness doesn't exist
-    # yet, so this is a deliberately conservative placeholder, not a
-    # fabricated "calibrated" number. A single global value is an honest
-    # MVP simplification (matching the schema's own "exactly one
-    # embedding_version in play until a real model migration happens"
-    # posture, S5's chunks migration) — the natural extension point once
-    # multiple embedding models/versions coexist is a per-(model, version)
-    # mapping, not a bigger constant.
-    retrieval_refusal_threshold: float = 0.01
+    # --- Grounded chat refusal (Sprint 6/7, ADR-6.4) ------------------------
+    # Gate 1's retrieval-score threshold — a real, data-derived calibrated
+    # value (issue #73), not a guess: evals/harness/calibrate.py collected
+    # the real fused RRF top-score for every "should ground" turn in the
+    # v1 golden set (issue #70, 19 positive samples) against
+    # LocalHashEmbeddingAdapter (embedding_version=1), then set the
+    # threshold to 50% of the weakest observed positive match (0.0164),
+    # comfortably clearing every real golden-set answer while staying
+    # firmly above zero. ADR-6.4 is explicit that this must be
+    # "calibrated per embedding model on the golden set" and
+    # "recalibrated as part of the embedding migration procedure" — a
+    # real provider embedding migration (or a v2 golden set with
+    # off-topic-against-populated-KB negative cases, see
+    # evals/golden/v1/README.md's documented gap) must rerun that script,
+    # not reuse this number. A single global value is still an honest MVP
+    # simplification (matching the schema's own "exactly one
+    # embedding_version in play" posture, S5's chunks migration) — the
+    # natural extension point once multiple embedding models/versions
+    # coexist is a per-(model, version) mapping, not a bigger constant.
+    retrieval_refusal_threshold: float = 0.0082
 
 
 @lru_cache(maxsize=1)
