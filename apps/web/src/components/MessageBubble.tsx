@@ -1,4 +1,4 @@
-import type { Citation, MessageRole } from "../api/types";
+import type { Citation, Feedback, FeedbackRating, MessageRole } from "../api/types";
 
 function formatPageRange(citation: Citation): string | null {
   if (citation.page_start === null) {
@@ -42,6 +42,50 @@ function CitationsFooter({ citations }: { citations: Citation[] }): JSX.Element 
   );
 }
 
+/** Thumbs up/down (FR-CH-6, issue #83) — the current selection persists
+ * across reload (GET .../messages threads the caller's own feedback
+ * back onto the message, mirroring citations). A second click on the
+ * already-selected rating still fires ``onFeedback`` (the backend
+ * upserts idempotently), keeping this component a dumb, stateless
+ * presenter — the mutation and its pending/error state live in
+ * MessageList, not here. */
+function FeedbackControls({
+  feedback,
+  onFeedback,
+}: {
+  feedback: Feedback | null;
+  onFeedback: (rating: FeedbackRating) => void;
+}): JSX.Element {
+  return (
+    <div className="mt-2 flex items-center gap-1 border-t border-neutral-200 pt-2">
+      <button
+        type="button"
+        aria-label="Good response"
+        aria-pressed={feedback?.rating === "up"}
+        onClick={() => onFeedback("up")}
+        className={`rounded px-1 text-xs ${
+          feedback?.rating === "up" ? "text-neutral-900" : "text-neutral-400 hover:text-neutral-700"
+        }`}
+      >
+        👍
+      </button>
+      <button
+        type="button"
+        aria-label="Bad response"
+        aria-pressed={feedback?.rating === "down"}
+        onClick={() => onFeedback("down")}
+        className={`rounded px-1 text-xs ${
+          feedback?.rating === "down"
+            ? "text-neutral-900"
+            : "text-neutral-400 hover:text-neutral-700"
+        }`}
+      >
+        👎
+      </button>
+    </div>
+  );
+}
+
 /**
  * Renders content as plain, whitespace-preserving text — never through
  * dangerouslySetInnerHTML. React's default child-text escaping is the
@@ -65,12 +109,18 @@ export function MessageBubble({
   pending = false,
   grounded = null,
   citations = [],
+  feedback = null,
+  onFeedback,
 }: {
   authorRole: MessageRole;
   content: string;
   pending?: boolean;
   grounded?: boolean | null;
   citations?: Citation[];
+  feedback?: Feedback | null;
+  /** Omitted for messages that can't yet receive feedback — a still-
+   * streaming turn with no persisted id, or a non-assistant message. */
+  onFeedback?: (rating: FeedbackRating) => void;
 }): JSX.Element {
   const isUser = authorRole === "user";
   const isRefusal = authorRole === "assistant" && grounded === false;
@@ -97,6 +147,7 @@ export function MessageBubble({
           </span>
         )}
         {!isUser && <CitationsFooter citations={citations} />}
+        {!isUser && onFeedback && <FeedbackControls feedback={feedback} onFeedback={onFeedback} />}
       </div>
     </div>
   );

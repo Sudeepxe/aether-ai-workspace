@@ -35,6 +35,7 @@ from aether.adapters.postgres.budget_repository import PostgresBudgetRepository
 from aether.adapters.postgres.chunk_search import PooledChunkSearch
 from aether.adapters.postgres.citation_repository import PostgresCitationRepository
 from aether.adapters.postgres.document_repository import PostgresDocumentRepository
+from aether.adapters.postgres.feedback_repository import PostgresFeedbackRepository
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
 from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
 from aether.adapters.postgres.memory_summary_store import PostgresMemorySummaryStore
@@ -90,6 +91,7 @@ from aether.app.threads.delete_thread import DeleteThread
 from aether.app.threads.get_thread import GetThread
 from aether.app.threads.list_messages import ListMessages
 from aether.app.threads.list_threads import ListThreads
+from aether.app.threads.submit_feedback import SubmitFeedback
 from aether.app.threads.update_thread import UpdateThread
 from aether.app.workspaces.create_workspace import CreateWorkspace
 from aether.app.workspaces.delete_workspace import DeleteWorkspace
@@ -109,6 +111,7 @@ from aether.ports.rate_limit import RateLimitPort
 from aether.ports.repositories import (
     CitationRepositoryPort,
     DocumentRepositoryPort,
+    FeedbackRepositoryPort,
     InvitationRepositoryPort,
     Membership,
     MembershipRepositoryPort,
@@ -217,6 +220,7 @@ class WorkspaceScope:
     threads: ThreadRepositoryPort
     messages: MessageRepositoryPort
     citations: CitationRepositoryPort
+    feedback: FeedbackRepositoryPort
     documents: DocumentRepositoryPort
     budgets: BudgetRepositoryPort
     audit_log: AuditLogPort
@@ -236,6 +240,7 @@ class WorkspaceScope:
     update_thread: UpdateThread
     delete_thread: DeleteThread
     list_messages: ListMessages
+    submit_feedback: SubmitFeedback
     get_budget: GetBudget
     update_budget: UpdateBudget
     initiate_document_upload: InitiateDocumentUpload
@@ -259,6 +264,7 @@ def build_workspace_scope(
     threads = PostgresThreadRepository(conn)
     messages = PostgresMessageRepository(conn)
     citations = PostgresCitationRepository(conn)
+    feedback = PostgresFeedbackRepository(conn)
     documents = PostgresDocumentRepository(conn)
     budgets = PostgresBudgetRepository(conn)
     audit_log = PostgresAuditLog(conn)
@@ -272,6 +278,7 @@ def build_workspace_scope(
         threads=threads,
         messages=messages,
         citations=citations,
+        feedback=feedback,
         documents=documents,
         budgets=budgets,
         audit_log=audit_log,
@@ -293,7 +300,8 @@ def build_workspace_scope(
         list_threads=ListThreads(threads=threads),
         update_thread=UpdateThread(threads=threads),
         delete_thread=DeleteThread(threads=threads, clock=clock),
-        list_messages=ListMessages(messages=messages, citations=citations),
+        list_messages=ListMessages(messages=messages, citations=citations, feedback=feedback),
+        submit_feedback=SubmitFeedback(messages=messages, feedback=feedback, ids=ids),
         get_budget=GetBudget(budgets=budgets),
         update_budget=UpdateBudget(budgets=budgets, audit_log=audit_log, ids=ids),
         initiate_document_upload=InitiateDocumentUpload(object_storage=object_storage, ids=ids),

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from aether.domain.entities import MessageRole, MessageStatus
+from aether.domain.entities import FeedbackRating, MessageRole, MessageStatus
 
 
 class CreateThreadRequest(BaseModel):
@@ -46,6 +46,16 @@ class CitationResponse(BaseModel):
     page_end: int | None
 
 
+class FeedbackResponse(BaseModel):
+    rating: FeedbackRating
+    reason: str | None
+
+
+class SubmitFeedbackRequest(BaseModel):
+    rating: FeedbackRating
+    reason: str | None = Field(default=None, max_length=2000)
+
+
 class MessageResponse(BaseModel):
     id: UUID
     workspace_id: UUID
@@ -61,6 +71,7 @@ class MessageResponse(BaseModel):
     cost_microcents: int | None
     grounded: bool
     citations: list[CitationResponse]
+    feedback: FeedbackResponse | None
     created_at: datetime
 
 

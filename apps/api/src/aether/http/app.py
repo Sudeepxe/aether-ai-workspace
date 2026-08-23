@@ -27,6 +27,7 @@ from aether.domain.errors import (
     DocumentUploadIncompleteError,
     DomainError,
     EmailAlreadyRegisteredError,
+    FeedbackNotEligibleError,
     GenerationNotFoundError,
     InvalidAccessTokenError,
     InvalidInvitationError,
@@ -34,6 +35,7 @@ from aether.domain.errors import (
     InvalidRefreshTokenError,
     LastOwnerProtectionError,
     MembershipNotFoundError,
+    MessageNotFoundError,
     NoProviderAvailableError,
     RefreshTokenReusedError,
     ThreadNotFoundError,
@@ -78,10 +80,16 @@ _ERROR_STATUS: dict[type[DomainError], int] = {
     ThreadNotFoundError: 404,
     GenerationNotFoundError: 404,
     DocumentNotFoundError: 404,
+    MessageNotFoundError: 404,
     # The client claims an upload finished; storage disagrees — a
     # precondition failure on the caller's own claimed state, not a
     # server error.
     DocumentUploadIncompleteError: 409,
+    # The request is well-formed but targets a message that structurally
+    # cannot receive feedback (a user's own turn, not the assistant's) —
+    # an unprocessable semantic state, not a missing resource or a
+    # conflicting write.
+    FeedbackNotEligibleError: 422,
     # Refused before any provider call (§3.2.14) — a hard limit, not a
     # transient failure, but 429 (not 402/403) matches the rest of the
     # API's rate-limit vocabulary for "retry later, not your credentials".

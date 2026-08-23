@@ -8,6 +8,8 @@ from uuid import UUID, uuid4
 from aether.domain.entities import (
     Citation,
     CitationDraft,
+    Feedback,
+    FeedbackRating,
     Message,
     MessageRole,
     MessageStatus,
@@ -160,6 +162,10 @@ class FakeMessageStore:
 
     find_by_client_message_id = get_by_client_message_id
 
+    async def get_by_id(self, workspace_id: UUID, message_id: UUID) -> Message | None:
+        message = self._rows.get(message_id)
+        return message if message is not None and message.workspace_id == workspace_id else None
+
     async def get_by_seq(self, workspace_id: UUID, thread_id: UUID, seq: int) -> Message | None:
         for m in self._rows.values():
             if m.workspace_id == workspace_id and m.thread_id == thread_id and m.seq == seq:
@@ -276,6 +282,49 @@ class FakeCitationRepository:
             for message_id in message_ids
             for c in self._rows.get(message_id, [])
             if c.workspace_id == workspace_id
+        ]
+
+
+class FakeFeedbackRepository:
+    """Standalone FeedbackRepositoryPort fake, keyed by (message_id,
+    user_id) to mirror the real table's UNIQUE constraint — a second
+    upsert for the same pair replaces rather than duplicates."""
+
+    def __init__(self) -> None:
+        self._rows: dict[tuple[UUID, UUID], Feedback] = {}
+
+    async def upsert(
+        self,
+        *,
+        id: UUID,
+        workspace_id: UUID,
+        message_id: UUID,
+        user_id: UUID,
+        rating: FeedbackRating,
+        reason: str | None,
+    ) -> Feedback:
+        key = (message_id, user_id)
+        existing = self._rows.get(key)
+        feedback = Feedback(
+            id=existing.id if existing is not None else id,
+            workspace_id=workspace_id,
+            message_id=message_id,
+            user_id=user_id,
+            rating=rating,
+            reason=reason,
+            created_at=existing.created_at if existing is not None else datetime.now().astimezone(),
+            updated_at=datetime.now().astimezone(),
+        )
+        self._rows[key] = feedback
+        return feedback
+
+    async def list_by_messages_for_user(
+        self, workspace_id: UUID, message_ids: list[UUID], user_id: UUID
+    ) -> list[Feedback]:
+        return [
+            f
+            for (message_id, uid), f in self._rows.items()
+            if uid == user_id and message_id in message_ids and f.workspace_id == workspace_id
         ]
 
 

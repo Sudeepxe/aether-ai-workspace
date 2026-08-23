@@ -5,8 +5,8 @@ from uuid import uuid4
 import pytest
 
 from aether.app.threads.list_messages import ListMessages, ListMessagesCommand
-from aether.domain.entities import CitationDraft, MessageRole, MessageStatus
-from tests.unit.fakes.chat import FakeCitationRepository, FakeMessageStore
+from aether.domain.entities import CitationDraft, FeedbackRating, MessageRole, MessageStatus
+from tests.unit.fakes.chat import FakeCitationRepository, FakeFeedbackRepository, FakeMessageStore
 
 pytestmark = pytest.mark.unit
 
@@ -14,7 +14,8 @@ pytestmark = pytest.mark.unit
 async def test_a_grounded_messages_citations_are_attached_to_its_page_item() -> None:
     messages = FakeMessageStore()
     citations = FakeCitationRepository()
-    workspace_id, thread_id = uuid4(), uuid4()
+    feedback = FakeFeedbackRepository()
+    workspace_id, thread_id, caller_id = uuid4(), uuid4(), uuid4()
 
     await messages.create(
         id=uuid4(),
@@ -49,10 +50,14 @@ async def test_a_grounded_messages_citations_are_attached_to_its_page_item() -> 
         ],
     )
 
-    use_case = ListMessages(messages=messages, citations=citations)
+    use_case = ListMessages(messages=messages, citations=citations, feedback=feedback)
     page = await use_case.execute(
         ListMessagesCommand(
-            workspace_id=workspace_id, thread_id=thread_id, after_seq=None, limit=10
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            caller_user_id=caller_id,
+            after_seq=None,
+            limit=10,
         )
     )
 
@@ -66,7 +71,8 @@ async def test_a_grounded_messages_citations_are_attached_to_its_page_item() -> 
 async def test_a_refusal_messages_citations_are_empty_and_never_looked_up() -> None:
     messages = FakeMessageStore()
     citations = FakeCitationRepository()
-    workspace_id, thread_id = uuid4(), uuid4()
+    feedback = FakeFeedbackRepository()
+    workspace_id, thread_id, caller_id = uuid4(), uuid4(), uuid4()
 
     await messages.create(
         id=uuid4(),
@@ -79,11 +85,64 @@ async def test_a_refusal_messages_citations_are_empty_and_never_looked_up() -> N
         grounded=False,
     )
 
-    use_case = ListMessages(messages=messages, citations=citations)
+    use_case = ListMessages(messages=messages, citations=citations, feedback=feedback)
     page = await use_case.execute(
         ListMessagesCommand(
-            workspace_id=workspace_id, thread_id=thread_id, after_seq=None, limit=10
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            caller_user_id=caller_id,
+            after_seq=None,
+            limit=10,
         )
     )
 
     assert page[0].citations == []
+    assert page[0].feedback is None
+
+
+async def test_the_callers_own_feedback_is_attached_and_another_users_is_not() -> None:
+    messages = FakeMessageStore()
+    citations = FakeCitationRepository()
+    feedback = FakeFeedbackRepository()
+    workspace_id, thread_id = uuid4(), uuid4()
+    caller_id, other_user_id = uuid4(), uuid4()
+
+    assistant = await messages.create(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        thread_id=thread_id,
+        role=MessageRole.ASSISTANT,
+        content="Acme costs $10/mo.",
+        status=MessageStatus.COMPLETE,
+        client_message_id=None,
+    )
+    await feedback.upsert(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        message_id=assistant.id,
+        user_id=caller_id,
+        rating=FeedbackRating.UP,
+        reason=None,
+    )
+    await feedback.upsert(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        message_id=assistant.id,
+        user_id=other_user_id,
+        rating=FeedbackRating.DOWN,
+        reason="wrong",
+    )
+
+    use_case = ListMessages(messages=messages, citations=citations, feedback=feedback)
+    page = await use_case.execute(
+        ListMessagesCommand(
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            caller_user_id=caller_id,
+            after_seq=None,
+            limit=10,
+        )
+    )
+
+    assert page[0].feedback is not None
+    assert page[0].feedback.rating == FeedbackRating.UP

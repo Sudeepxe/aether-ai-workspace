@@ -224,6 +224,31 @@ class CitationDraft:
     page_end: int | None
 
 
+class FeedbackRating(StrEnum):
+    UP = "up"
+    DOWN = "down"
+
+
+@dataclass(frozen=True, slots=True)
+class Feedback:
+    """One caller's 👍/👎 (+ optional reason) on an assistant message
+    (FR-CH-6, §8.1) — captured for eval curation, one of the prod-drift
+    signal proxies §6.4 substitutes for live judge scoring. Latest-wins
+    per (message, user): a caller changing their mind upserts this row
+    rather than creating a second one (``UNIQUE(message_id, user_id)``
+    is what makes that upsert target valid, same pattern as
+    ``MemorySummary``'s per-thread upsert)."""
+
+    id: UUID
+    workspace_id: UUID
+    message_id: UUID
+    user_id: UUID
+    rating: FeedbackRating
+    reason: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
 @dataclass(frozen=True, slots=True)
 class RefreshToken:
     """Represents one node in a refresh-token family (ADR-7.2).
