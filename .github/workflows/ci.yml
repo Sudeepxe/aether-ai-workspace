@@ -226,9 +226,91 @@ jobs:
           retention-days: 7
 
   eval-smoke:
-    if: ${{ false }}   # ENABLED IN S7 — 20-case golden smoke, path-filtered (§6.4)
+    # The v1 golden set (20 cases, issue #70) through the real harness
+    # (issue #69) — path-filtered per §6.4's cost-bounded PR tier: only
+    # runs when retrieval/generation/chunking/config code or the eval
+    # harness/golden set itself actually changed. Gates merge on a
+    # mechanical-metric regression (this set's real, verified 100%
+    # baseline) — faithfulness/adversarial-safety never gate, since
+    # they're honestly not measured without a real LLM provider key
+    # (issue #71). No separate API/worker process needed: the harness
+    # drives the real HTTP app in-process and ingests via
+    # DocumentProcessor directly (same bypass-the-queue-but-not-the-
+    # pipeline pattern the integration suite already uses), so this
+    # job's infra is lighter than e2e's.
     runs-on: ubuntu-latest
-    steps: [{ run: "echo enabled in S7" }]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: { fetch-depth: 0 }
+      - name: Check whether AI-relevant paths changed
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          PATHS="apps/api/src/aether/app/retrieval apps/api/src/aether/app/llm \
+            apps/api/src/aether/app/chat apps/api/src/aether/app/ingestion/chunking.py \
+            apps/api/src/aether/adapters/echo apps/api/src/aether/adapters/openai \
+            apps/api/src/aether/adapters/anthropic apps/api/src/aether/adapters/local \
+            apps/api/src/aether/config.py evals"
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$BASE" HEAD -- $PATHS; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        if: steps.changes.outputs.changed == 'true'
+      - name: Start dev infra (Postgres, Redis, MinIO, ClamAV)
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          docker compose -f infra/compose/compose.yml --profile dev up -d --wait \
+            postgres redis minio clamav
+      - name: Migrate + provision the bucket
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: apps/api
+        env:
+          AETHER_DATABASE_MIGRATOR_URL: postgresql://aether:aether-dev-only@localhost:5432/aether
+        run: |
+          uv sync
+          uv run alembic upgrade head
+          uv run python -c "
+          import asyncio
+          from aether.adapters.minio.object_storage import MinioObjectStorage
+          from aether.config import get_settings
+          s = get_settings()
+          asyncio.run(MinioObjectStorage(
+              endpoint=s.object_storage_endpoint, access_key=s.object_storage_access_key,
+              secret_key=s.object_storage_secret_key, secure=s.object_storage_secure,
+              bucket=s.object_storage_bucket,
+          ).ensure_bucket())
+          "
+      - name: Run eval smoke (golden set v1)
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: apps/api
+        env:
+          PYTHONPATH: ../..
+          AETHER_DATABASE_URL: postgresql://app_api:app-api-dev-only@localhost:5432/aether
+          AETHER_DATABASE_MIGRATOR_URL: postgresql://aether:aether-dev-only@localhost:5432/aether
+          AETHER_DATABASE_WORKER_URL: postgresql://app_worker:app-worker-dev-only@localhost:5432/aether
+          AETHER_REDIS_URL: redis://localhost:6379/0
+          AETHER_JWT_SIGNING_KEY: "ENa+PofIf23y5gFynYezonUkV5iu0pgeEe/PHlqCG4E=" # gitleaks:allow
+          AETHER_JWT_KID: dev-1
+        run: uv run python -m evals.harness.cli run --report-json /tmp/eval-smoke-report.json
+      - name: Upload eval report
+        if: steps.changes.outputs.changed == 'true' && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: eval-smoke-report
+          path: /tmp/eval-smoke-report.json
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: No AI-relevant paths changed
+        if: steps.changes.outputs.changed == 'false'
+        run: echo "Skipping eval smoke — no retrieval/generation/chunking/eval-harness paths changed."
 
   perf-smoke:
     if: ${{ false }}   # ENABLED IN S9 — k6 relative-regression budgets (ADR-2.4)
