@@ -8,27 +8,32 @@ refusal. Built end-to-end by one engineer as an architecture-first flagship:
 the AI features are one subsystem inside a real production application
 (auth, tenancy, budgets, audit, observability, DR) — not the whole app.
 
-> **Status: Sprint 5 — Ingestion complete.** Sprints 0–4 (factory; identity &
-> forced row-level-security tenant isolation; workspace/membership/invitation
-> CRUD, RBAC, audit logging, email, rate limiting; the real-time streaming
-> spine with cross-replica resume/cancel; the LLM Router with usage/budget
-> admission) are merged to `main`. Sprint 5 builds the full knowledge-base
-> ingestion pipeline end to end: a `documents`/`chunks` schema (pgvector,
-> forced RLS, structure-aware provenance) → presigned-POST object storage →
-> a per-tenant fair-queued Redis Streams consumer (round-robin scheduling so
-> one tenant's bulk upload can't starve another's single job, NFR-S-2) → the
-> real pipeline handler (real ClamAV malware scan, magic-byte type
-> detection, per-format parsers for PDF/DOCX/MD/HTML/TXT, ADR-6.2
-> structure-aware chunking) → batched embedding with a content-hash dedupe
-> cache and a transactional `EMBEDDING`→`READY` upsert → the HTTP/SPA
-> surface (presigned two-step upload, cursor-paginated list, status detail,
-> FR-KB-5 provable cascading deletion). Real OpenAI/Anthropic keys aren't
-> provisioned yet, so both the chat generator and the embedding call fall
-> back to honest, clearly-labeled local placeholders (echo completion,
-> deterministic non-semantic embeddings) in dev/CI — real providers activate
-> automatically the moment the corresponding API key is set, no code change
-> required. This README is honest about state: no fake badges, no
-> aspirational numbers.
+> **Status: Sprint 6 — Grounded chat complete.** Sprints 0–5 (factory;
+> identity & forced row-level-security tenant isolation;
+> workspace/membership/invitation CRUD, RBAC, audit logging, email, rate
+> limiting; the real-time streaming spine with cross-replica resume/cancel;
+> the LLM Router with usage/budget admission; the full knowledge-base
+> ingestion pipeline — schema, object storage, fair-queued pipeline, malware
+> scan, structure-aware chunking, embedding, document CRUD/upload UI) are
+> merged to `main`. Sprint 6 makes chat actually grounded end to end: dual-
+> feed condensing query rewrite → hybrid retrieval (pgvector HNSW + Postgres
+> full-text, Reciprocal Rank Fusion, MMR de-duplication) → a two-gate refusal
+> protocol (ADR-6.4 — a retrieval-confidence gate that skips the generator
+> entirely on a weak/empty match, and a generation-time "answer only from
+> context" gate) → per-chunk citations persisted in the same transaction as
+> the assistant message (ADR-8.6, surviving intact even after their source
+> document is later deleted) → a citations/refusal UI, all proven against
+> real infrastructure including a real ingested document and a real
+> end-to-end refusal, not fixtures. Real OpenAI/Anthropic keys aren't
+> provisioned yet, so the chat generator, the embedding call, and query
+> rewrite all fall back to honest, clearly-labeled local placeholders (echo
+> completion that's grounding-aware, deterministic non-semantic embeddings,
+> a no-op rewriter) in dev/CI — real providers activate automatically the
+> moment the corresponding API key is set, no code change required. A real
+> LLM key is also what Sprint 7's eval harness needs for a genuine
+> faithfulness/refusal score — until then that number stays an honest
+> placeholder, never fabricated. This README is honest about state: no fake
+> badges, no aspirational numbers.
 >
 > **Branch protection note:** required status checks on `main` are enforced
 > manually (every merge verifies all CI jobs green before squashing) rather
@@ -60,6 +65,7 @@ resume; a thin owned **LLM router** with fallback chains; and a CI-gated
 | Streaming chat (SSE, cross-replica resume/cancel) + SPA | live (S3) |
 | LLM Router (OpenAI/Anthropic, breakers, fallback, concurrency limits) + usage/budget admission | live (S4) — falls back to S3's echo generator until real provider keys are provisioned |
 | Knowledge-base ingestion (schema, object storage, fair-queued pipeline, malware scan, chunking, embedding) + document CRUD & upload UI | live (S5) — falls back to a local, honest, non-semantic embedder until real provider keys are provisioned |
+| Grounded chat (hybrid retrieval + RRF/MMR, query rewrite, two-gate refusal, per-chunk citations) + citations/refusal UI | live (S6) — real end-to-end proof: a real ingested document produces a real cited answer, a real out-of-KB query refuses, both in a real browser |
 | **Eval score (faithfulness / refusal)** | measured from S7 — placeholder until then, never faked |
 | One-command demo | infra: `make dev` today · full demo profile: S9–S11 |
 
