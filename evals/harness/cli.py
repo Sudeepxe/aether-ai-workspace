@@ -25,6 +25,7 @@ import asyncio
 import json
 import sys
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 
 import asyncpg
@@ -36,6 +37,7 @@ from aether.adapters.postgres.pool import _init_connection
 from aether.config import get_settings
 from evals.harness.judge import FaithfulnessStatus, FaithfulnessVerdict, judge_case_faithfulness
 from evals.harness.metrics import AggregateMetrics, CaseMetrics, aggregate, score_case
+from evals.harness.report import render_report
 from evals.harness.runner import run_golden_set
 from evals.harness.schema import load_golden_set
 
@@ -99,7 +101,7 @@ def _write_report_json(
     path.write_text(json.dumps(payload, indent=2, default=str))
 
 
-async def _run(golden_dir: Path, report_json: Path | None) -> int:
+async def _run(golden_dir: Path, report_json: Path | None, report_md: Path | None) -> int:
     settings = get_settings()
     cases = load_golden_set(golden_dir)
     if not cases:
@@ -166,6 +168,16 @@ async def _run(golden_dir: Path, report_json: Path | None) -> int:
             report_json, case_metrics=case_metrics, agg=agg, faithfulness=faithfulness
         )
         print(f"\nwrote {report_json}")
+    if report_md is not None:
+        report_md.write_text(
+            render_report(
+                agg=agg,
+                case_metrics=case_metrics,
+                faithfulness=faithfulness,
+                generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            )
+        )
+        print(f"wrote {report_md}")
 
     exit_code = 0
     failed = [c for c in case_metrics if not c.ran_successfully]
@@ -195,8 +207,14 @@ def main() -> None:
         default=None,
         help="write a machine-readable report to this path",
     )
+    parser.add_argument(
+        "--report-md",
+        type=Path,
+        default=None,
+        help="write a human-readable Markdown report to this path",
+    )
     args = parser.parse_args()
-    exit_code = asyncio.run(_run(args.golden_dir, args.report_json))
+    exit_code = asyncio.run(_run(args.golden_dir, args.report_json, args.report_md))
     raise SystemExit(exit_code)
 
 
