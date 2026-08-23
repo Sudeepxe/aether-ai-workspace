@@ -168,6 +168,27 @@ class Message:
 
 
 @dataclass(frozen=True, slots=True)
+class MemorySummary:
+    """A thread's rolling compaction summary (§3.2.6, §8.1) — latest-wins
+    per thread, not an append-only log: each compaction replaces the
+    previous row, advancing ``upto_seq`` to cover more of the thread's
+    history. ``model`` is the compactor that produced this text — a real
+    cheap-model call if a provider key is configured, or the honest
+    deterministic fallback's own label otherwise (never silently
+    unlabeled, so a reader can tell which one produced it)."""
+
+    id: UUID
+    workspace_id: UUID
+    thread_id: UUID
+    upto_seq: int
+    content: str
+    model: str
+    token_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class Citation:
     """One grounded message's reference to a retrieved chunk (ADR-8.6,
     §8.1). ``document_title``/``section_path``/``page_start``/

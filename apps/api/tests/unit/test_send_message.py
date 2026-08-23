@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from aether.app.chat.memory_assembly import MemoryAssembler
 from aether.app.chat.send_message import SendMessage, SendMessageCommand
 from aether.app.retrieval.hybrid_search import HybridSearch
 from aether.app.retrieval.query_rewrite import QueryRewriter
@@ -31,6 +32,7 @@ from tests.unit.fakes.chat import (
     FakeStreamBuffer,
     FakeUsageLedger,
 )
+from tests.unit.fakes.memory import FakeMemoryCompactor, FakeMemorySummaryStore
 from tests.unit.fakes.query_rewrite import FakeQueryRewriter
 from tests.unit.fakes.retrieval import FakeChunkSearch, FakeQueryEmbedder
 
@@ -94,12 +96,20 @@ def _orchestrator(
     )
     query_rewriter = QueryRewriter(rewriter=FakeQueryRewriter())
     retrieval_gate = RetrievalGate(threshold=threshold)
+    memory = MemoryAssembler(
+        messages=messages,
+        summaries=FakeMemorySummaryStore(),
+        compactor=FakeMemoryCompactor(),
+        compactor_model_label="fake-compactor",
+        ids=FakeIdGenerator(),
+    )
     orchestrator = SendMessage(
         messages=messages,
         generator=fake_generator,
         hybrid_search=hybrid_search,
         query_rewriter=query_rewriter,
         retrieval_gate=retrieval_gate,
+        memory=memory,
         buffer=buffer,
         cancellation=cancellation,
         admission=admission,
@@ -253,6 +263,38 @@ async def test_gate_1_refusal_below_threshold_even_with_chunks_present() -> None
     assert isinstance(events[0], MetaStreamEvent)
     assert events[0].grounded is False
     assert generator.contexts_seen == []
+
+
+async def test_a_long_prior_history_gets_compacted_and_threaded_into_the_generator_call() -> None:
+    messages = FakeMessageStore()
+    workspace_id, thread_id = uuid4(), uuid4()
+    for i in range(8):
+        await messages.create(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            role=MessageRole.USER if i % 2 == 0 else MessageRole.ASSISTANT,
+            content=" ".join(f"earlier-word-{i}-{j}" for j in range(300)),
+            status=MessageStatus.COMPLETE,
+            client_message_id=f"cmid-earlier-{i}" if i % 2 == 0 else None,
+        )
+    orchestrator, _, _, _, _, generator = _orchestrator(deltas=["ok"], messages=messages)
+
+    events = [
+        e
+        async for e in orchestrator.execute(
+            SendMessageCommand(
+                workspace_id=workspace_id,
+                thread_id=thread_id,
+                content="what did we discuss?",
+                client_message_id="cmid-compaction",
+            )
+        )
+    ]
+
+    assert isinstance(events[0], MetaStreamEvent)
+    assert events[0].grounded is True
+    assert generator.memory_summaries_seen == ["fake summary"]
 
 
 async def test_retried_post_with_same_client_message_id_replays_without_regenerating() -> None:

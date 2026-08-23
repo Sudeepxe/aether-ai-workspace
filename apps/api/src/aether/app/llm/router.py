@@ -98,8 +98,9 @@ class LlmRouter:
         thread_history: list[Message],
         user_content: str,
         context: RetrievedContext | None = None,
+        memory_summary: str | None = None,
     ) -> AsyncIterator[GeneratorChunk]:
-        messages = _build_messages(thread_history, user_content, context)
+        messages = _build_messages(thread_history, user_content, context, memory_summary)
         last_error: Exception | None = None
 
         for provider_name, model in self._model_chain:
@@ -167,12 +168,21 @@ def _cost_microcents(
 
 
 def _build_messages(
-    thread_history: list[Message], user_content: str, context: RetrievedContext | None
+    thread_history: list[Message],
+    user_content: str,
+    context: RetrievedContext | None,
+    memory_summary: str | None,
 ) -> list[LlmMessage]:
     history = [
         LlmMessage(role=_HISTORY_ROLE_MAP[m.role], content=m.content) for m in thread_history
     ]
     system_prompt = _SYSTEM_PROMPT if context is None else _render_grounded_prompt(context)
+    if memory_summary:
+        # §6's layered assembly: memory sits between system policy and
+        # retrieved context — folded into the system prompt rather than
+        # a separate message, since it's background the model should
+        # treat as established fact, not a turn to respond to.
+        system_prompt += f"\n\nEarlier conversation summary:\n{memory_summary}"
     return [
         LlmMessage(role=LlmMessageRole.SYSTEM, content=system_prompt),
         *history,

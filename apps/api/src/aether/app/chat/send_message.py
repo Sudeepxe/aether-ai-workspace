@@ -51,6 +51,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from uuid import UUID
 
+from aether.app.chat.memory_assembly import MemoryAssembler
 from aether.app.retrieval.hybrid_search import HybridSearch, RankedChunk
 from aether.app.retrieval.query_rewrite import QueryRewriter
 from aether.app.retrieval.refusal_gate import RetrievalGate
@@ -83,8 +84,6 @@ from aether.ports.metering import BudgetAdmissionPort, UsageEventKind, UsageLedg
 from aether.ports.security import IdPort
 from aether.ports.streaming import BufferedEvent, CancellationPort, StreamBufferPort
 
-_HISTORY_LIMIT = 20  # recent messages passed as generator context
-
 
 @dataclass(frozen=True, slots=True)
 class SendMessageCommand:
@@ -103,6 +102,7 @@ class SendMessage:
         hybrid_search: HybridSearch,
         query_rewriter: QueryRewriter,
         retrieval_gate: RetrievalGate,
+        memory: MemoryAssembler,
         buffer: StreamBufferPort,
         cancellation: CancellationPort,
         admission: BudgetAdmissionPort,
@@ -116,6 +116,7 @@ class SendMessage:
         self._hybrid_search = hybrid_search
         self._query_rewriter = query_rewriter
         self._retrieval_gate = retrieval_gate
+        self._memory = memory
         self._buffer = buffer
         self._cancellation = cancellation
         self._admission = admission
@@ -179,9 +180,8 @@ class SendMessage:
                 client_message_id=command.client_message_id,
             )
 
-        history = await self._messages.recent(
-            command.workspace_id, command.thread_id, limit=_HISTORY_LIMIT
-        )
+        memory_context = await self._memory.assemble(command.workspace_id, command.thread_id)
+        history = memory_context.window
         # `history`'s last entry is the user turn just persisted above —
         # the rewriter wants only *prior* turns to condense against.
         dual_feed_query = await self._query_rewriter.build_dual_feed_query(
@@ -265,7 +265,10 @@ class SendMessage:
         ) as cancel_sub:
             try:
                 async for chunk in self._generator.generate(
-                    thread_history=history, user_content=command.content, context=context
+                    thread_history=history,
+                    user_content=command.content,
+                    context=context,
+                    memory_summary=memory_context.summary,
                 ):
                     if cancel_sub.is_cancelled():
                         status = GenerationStatus.CANCELLED
