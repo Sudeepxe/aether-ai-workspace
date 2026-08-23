@@ -1,0 +1,20 @@
+{
+  "id": "multiturn-acme-refund-followup",
+  "case_class": "multi_turn",
+  "corpus_files": ["acme-refund-policy.md"],
+  "turns": [
+    {
+      "query": "Tell me about Acme's refund policy.",
+      "expect_grounded": true,
+      "expect_gold_document": "acme-refund-policy.md",
+      "expect_gold_section_contains": "Refund"
+    },
+    {
+      "query": "What is excluded from it?",
+      "expect_grounded": true,
+      "expect_gold_document": "acme-refund-policy.md",
+      "expect_gold_section_contains": "Refund"
+    }
+  ],
+  "rubric": "The second turn's 'it' must resolve to Acme's refund policy via query rewrite (issue #57) — the reply should mention custom enterprise contracts as the exclusion, not answer a different or generic question."
+}

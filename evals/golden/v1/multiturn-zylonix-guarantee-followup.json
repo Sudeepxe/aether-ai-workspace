@@ -1,0 +1,20 @@
+{
+  "id": "multiturn-zylonix-guarantee-followup",
+  "case_class": "multi_turn",
+  "corpus_files": ["zylonix-support-policy.md"],
+  "turns": [
+    {
+      "query": "What is Zylonix's money-back guarantee?",
+      "expect_grounded": true,
+      "expect_gold_document": "zylonix-support-policy.md",
+      "expect_gold_section_contains": "Zylonix"
+    },
+    {
+      "query": "How do I submit a claim under it?",
+      "expect_grounded": true,
+      "expect_gold_document": "zylonix-support-policy.md",
+      "expect_gold_section_contains": "Zylonix"
+    }
+  ],
+  "rubric": "The second turn's 'it' must resolve to Zylonix's guarantee via query rewrite — the reply should mention contacting support with the order number, not a generic claims process."
+}

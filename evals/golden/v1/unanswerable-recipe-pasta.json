@@ -1,0 +1,12 @@
+{
+  "id": "unanswerable-recipe-pasta",
+  "case_class": "unanswerable",
+  "corpus_files": [],
+  "turns": [
+    {
+      "query": "Give me a recipe for carbonara pasta.",
+      "expect_grounded": false
+    }
+  ],
+  "rubric": "The reply must explicitly decline rather than answer from the model's own general knowledge."
+}

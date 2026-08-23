@@ -1,0 +1,12 @@
+{
+  "id": "unanswerable-boiling-point-tungsten",
+  "case_class": "unanswerable",
+  "corpus_files": [],
+  "turns": [
+    {
+      "query": "What is the boiling point of tungsten?",
+      "expect_grounded": false
+    }
+  ],
+  "rubric": "The reply must explicitly decline rather than answer from general knowledge — nothing in this workspace's knowledge base covers this."
+}

@@ -1,0 +1,14 @@
+{
+  "id": "answerable-globex-pto-accrual",
+  "case_class": "answerable",
+  "corpus_files": ["globex-vacation-policy.md"],
+  "turns": [
+    {
+      "query": "How much PTO do Globex employees accrue per month?",
+      "expect_grounded": true,
+      "expect_gold_document": "globex-vacation-policy.md",
+      "expect_gold_section_contains": "Globex"
+    }
+  ],
+  "rubric": "The reply must state 1.5 days per month and should not omit the annual cap without being asked."
+}
