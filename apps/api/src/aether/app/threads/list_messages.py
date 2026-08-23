@@ -7,8 +7,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from aether.domain.entities import Message
-from aether.ports.repositories import MessageRepositoryPort
+from aether.domain.entities import Citation, Message
+from aether.ports.repositories import CitationRepositoryPort, MessageRepositoryPort
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,14 +19,34 @@ class ListMessagesCommand:
     limit: int
 
 
-class ListMessages:
-    def __init__(self, *, messages: MessageRepositoryPort) -> None:
-        self._messages = messages
+@dataclass(frozen=True, slots=True)
+class MessageWithCitations:
+    """A page item combining one message with its citations (issue #61's
+    frontend needs both without a second round trip) — ``citations`` is
+    always ``[]`` for a non-grounded message, never fetched for one
+    (grounded is the only role citations exist under, ADR-8.6)."""
 
-    async def execute(self, command: ListMessagesCommand) -> list[Message]:
-        return await self._messages.list_by_thread(
+    message: Message
+    citations: list[Citation]
+
+
+class ListMessages:
+    def __init__(
+        self, *, messages: MessageRepositoryPort, citations: CitationRepositoryPort
+    ) -> None:
+        self._messages = messages
+        self._citations = citations
+
+    async def execute(self, command: ListMessagesCommand) -> list[MessageWithCitations]:
+        page = await self._messages.list_by_thread(
             command.workspace_id,
             command.thread_id,
             after_seq=command.after_seq,
             limit=command.limit,
         )
+        grounded_ids = [m.id for m in page if m.grounded]
+        all_citations = await self._citations.list_by_messages(command.workspace_id, grounded_ids)
+        by_message: dict[UUID, list[Citation]] = {}
+        for citation in all_citations:
+            by_message.setdefault(citation.message_id, []).append(citation)
+        return [MessageWithCitations(message=m, citations=by_message.get(m.id, [])) for m in page]

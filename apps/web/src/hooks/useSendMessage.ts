@@ -10,7 +10,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
 
 import { cancelGeneration, postMessageForStream } from "../api/chat";
-import type { DoneEventData, ErrorEventData, MetaEventData, TokenEventData } from "../api/types";
+import type {
+  CitationEventData,
+  DoneEventData,
+  ErrorEventData,
+  MetaEventData,
+  TokenEventData,
+} from "../api/types";
 import { toApiError } from "../lib/apiClient";
 import { SeqDeduper, streamSse } from "../lib/sse";
 import { RafBatcher, useChatStreamStore, type StreamPhase } from "../state/chatStreamStore";
@@ -73,12 +79,24 @@ export function useSendMessage(
         switch (frame.event) {
           case "meta": {
             const data = frame.data as MetaEventData;
-            useChatStreamStore.getState().begin(threadId, data.generation_id);
+            useChatStreamStore.getState().begin(threadId, data.generation_id, data.grounded);
             useChatStreamStore.getState().setPhase("streaming");
             break;
           }
           case "token": {
             batcher.append((frame.data as TokenEventData).delta);
+            break;
+          }
+          case "citation": {
+            const data = frame.data as CitationEventData;
+            useChatStreamStore.getState().addCitation({
+              id: data.citation_id,
+              chunk_id: data.chunk_id,
+              document_title: data.document_title,
+              section_path: data.section_path,
+              page_start: data.page_start,
+              page_end: data.page_end,
+            });
             break;
           }
           case "done": {

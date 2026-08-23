@@ -18,6 +18,19 @@ export interface Thread {
 export type MessageRole = "user" | "assistant" | "system";
 export type MessageStatus = "complete" | "partial" | "cancelled";
 
+// A grounded reply's provenance snapshot (issue #59, ADR-8.6) — captured
+// at write time, so it survives intact even after its source chunk is
+// later deleted (chunk_id becomes null: the UI's "source removed" state,
+// not a broken citation).
+export interface Citation {
+  id: string;
+  chunk_id: string | null;
+  document_title: string;
+  section_path: string;
+  page_start: number | null;
+  page_end: number | null;
+}
+
 export interface ChatMessage {
   id: string;
   workspace_id: string;
@@ -28,6 +41,8 @@ export interface ChatMessage {
   status: MessageStatus;
   client_message_id: string | null;
   model: string | null;
+  grounded: boolean;
+  citations: Citation[];
   created_at: string;
 }
 
@@ -46,6 +61,15 @@ export interface MetaEventData {
 
 export interface TokenEventData {
   delta: string;
+}
+
+export interface CitationEventData {
+  citation_id: string;
+  chunk_id: string | null;
+  document_title: string;
+  section_path: string;
+  page_start: number | null;
+  page_end: number | null;
 }
 
 export interface UsageEventData {

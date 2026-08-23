@@ -310,3 +310,11 @@ class CitationRepositoryPort(Protocol):
         ...
 
     async def list_by_message(self, workspace_id: UUID, message_id: UUID) -> list[Citation]: ...
+
+    async def list_by_messages(self, workspace_id: UUID, message_ids: list[UUID]) -> list[Citation]:
+        """Batched sibling of ``list_by_message`` — one query for a whole
+        page of messages (issue #61's GET .../messages, which must not
+        N+1 a citations lookup per message). The caller groups the flat
+        result by ``message_id`` itself; an empty ``message_ids`` list
+        returns ``[]`` without a round trip."""
+        ...

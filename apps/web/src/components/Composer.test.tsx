@@ -45,7 +45,7 @@ describe("Composer", () => {
   });
 
   it("shows Stop instead of Send while a stream is active, and wires it to onCancel", async () => {
-    useChatStreamStore.getState().begin("thread-1", "gen-1");
+    useChatStreamStore.getState().begin("thread-1", "gen-1", true);
     useChatStreamStore.getState().setPhase("streaming");
     const user = userEvent.setup();
     const onCancel = vi.fn();
@@ -59,7 +59,7 @@ describe("Composer", () => {
   });
 
   it("disables the textarea while a stream is active", () => {
-    useChatStreamStore.getState().begin("thread-1", "gen-1");
+    useChatStreamStore.getState().begin("thread-1", "gen-1", true);
     useChatStreamStore.getState().setPhase("submitted");
     render(<Composer onSend={vi.fn()} onCancel={vi.fn()} />);
 

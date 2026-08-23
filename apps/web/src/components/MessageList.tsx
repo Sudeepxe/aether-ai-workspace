@@ -41,13 +41,21 @@ export function MessageList({
         <p className="text-sm text-neutral-400">Say hello to start the conversation.</p>
       )}
       {ordered.map((message) => (
-        <MessageBubble key={message.id} authorRole={message.role} content={message.content} />
+        <MessageBubble
+          key={message.id}
+          authorRole={message.role}
+          content={message.content}
+          grounded={message.grounded}
+          citations={message.citations}
+        />
       ))}
       {activeStream !== null && activeStream.threadId === threadId && (
         <MessageBubble
           authorRole="assistant"
           content={activeStream.content}
           pending={activeStream.phase === "streaming" || activeStream.phase === "submitted"}
+          grounded={activeStream.grounded}
+          citations={activeStream.citations}
         />
       )}
       {activeStream?.phase === "errored" && (
