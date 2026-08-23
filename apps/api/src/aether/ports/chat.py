@@ -106,6 +106,7 @@ class GeneratorPort(Protocol):
         thread_history: list[Message],
         user_content: str,
         context: RetrievedContext | None = None,
+        memory_summary: str | None = None,
     ) -> AsyncIterator[GeneratorChunk]:
         """Yields text deltas, then exactly one GenerationUsage as the
         final item. May raise (a real provider's failure modes —
@@ -118,7 +119,12 @@ class GeneratorPort(Protocol):
         declining ("not in the knowledge base") if it can't, never
         falling back to the model's own general knowledge or to
         ``thread_history``. Absent means an ordinary ungrounded turn,
-        unchanged from pre-S6 behavior."""
+        unchanged from pre-S6 behavior.
+
+        ``memory_summary`` (issue #82, §3.2.6), when present, is a
+        rolling compaction summary of thread history that fell outside
+        ``thread_history``'s own token-budgeted window — earlier
+        conversation context to draw on, not new instructions."""
         ...
 
 

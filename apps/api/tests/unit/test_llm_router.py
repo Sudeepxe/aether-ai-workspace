@@ -311,6 +311,38 @@ async def test_grounded_context_switches_to_the_grounded_system_prompt_with_the_
     assert "pricing.md" in system_message.content
 
 
+async def test_memory_summary_is_appended_to_the_system_prompt_when_present() -> None:
+    """Issue #82's §6 layered assembly: a rolling compaction summary
+    (whatever fell outside the token-budgeted window) gets folded into
+    the system prompt so the model can still draw on it."""
+    provider = FakeProviderAdapter(name="fake", chunks=["ok"])
+    router, _ = _router(providers={"fake": provider}, model_chain=[("fake", "fake-model")])
+    context = RetrievedContext(chunks=[])
+
+    async for _ in router.generate(
+        thread_history=[],
+        user_content="anything",
+        context=context,
+        memory_summary="Earlier, the user asked about Acme's refund policy.",
+    ):
+        pass
+
+    system_message = provider.calls[0].messages[0]
+    assert "Earlier, the user asked about Acme's refund policy." in system_message.content
+
+
+async def test_no_memory_summary_leaves_the_system_prompt_unchanged() -> None:
+    provider = FakeProviderAdapter(name="fake", chunks=["ok"])
+    router, _ = _router(providers={"fake": provider}, model_chain=[("fake", "fake-model")])
+    context = RetrievedContext(chunks=[])
+
+    async for _ in router.generate(thread_history=[], user_content="anything", context=context):
+        pass
+
+    system_message = provider.calls[0].messages[0]
+    assert "Earlier conversation summary" not in system_message.content
+
+
 async def test_grounded_context_with_no_chunks_still_uses_the_grounded_prompt() -> None:
     """A grounded call that legitimately found nothing (Gate 1 would
     normally have refused before reaching here, but the generator's

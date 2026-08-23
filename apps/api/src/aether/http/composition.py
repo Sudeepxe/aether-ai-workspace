@@ -19,9 +19,14 @@ from aether.adapters.clock import SystemClock
 from aether.adapters.echo.generator import EchoGenerator
 from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.jwt.eddsa import EdDSATokenSigner
+from aether.adapters.llm.memory_compaction import LlmMemoryCompactionAdapter
 from aether.adapters.llm.query_rewrite import LlmQueryRewriteAdapter
 from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.local.noop_query_rewrite import NoOpQueryRewriteAdapter
+from aether.adapters.local.truncating_memory_compaction import (
+    MODEL_NAME as TRUNCATING_MEMORY_COMPACTION_MODEL_NAME,
+)
+from aether.adapters.local.truncating_memory_compaction import TruncatingMemoryCompactionAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.openai.completion import OpenAiCompletionAdapter
 from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
@@ -32,6 +37,7 @@ from aether.adapters.postgres.citation_repository import PostgresCitationReposit
 from aether.adapters.postgres.document_repository import PostgresDocumentRepository
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
 from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
+from aether.adapters.postgres.memory_summary_store import PostgresMemorySummaryStore
 from aether.adapters.postgres.message_repository import PostgresMessageRepository
 from aether.adapters.postgres.message_store import PostgresMessageStore
 from aether.adapters.postgres.outbox_repository import PostgresOutboxRepository
@@ -59,6 +65,7 @@ from aether.app.auth.register_user import RegisterUser
 from aether.app.auth.revoke_user_sessions import RevokeUserSessions
 from aether.app.chat.cancel_generation import CancelGeneration
 from aether.app.chat.get_generation_status import GetGenerationStatus
+from aether.app.chat.memory_assembly import MemoryAssembler
 from aether.app.chat.send_message import SendMessage
 from aether.app.documents.confirm_upload import ConfirmDocumentUpload
 from aether.app.documents.delete_document import DeleteDocument
@@ -94,6 +101,7 @@ from aether.ports.audit import AuditLogPort
 from aether.ports.chat import GeneratorPort, MessageStorePort
 from aether.ports.embedding import EmbeddingProviderPort
 from aether.ports.llm import ProviderAdapterPort
+from aether.ports.memory import MemoryCompactionPort
 from aether.ports.metering import BudgetAdmissionPort, BudgetRepositoryPort, UsageLedgerPort
 from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.query_rewrite import QueryRewritePort
@@ -433,6 +441,14 @@ async def build_container(settings: Settings) -> Container:
     chat_hybrid_search = HybridSearch(chunk_search=PooledChunkSearch(db_pool), embedder=embedder)
     chat_query_rewriter = QueryRewriter(rewriter=query_rewriter)
     chat_retrieval_gate = RetrievalGate(threshold=settings.retrieval_refusal_threshold)
+    memory_compactor, memory_compactor_model = _build_memory_compactor(settings)
+    chat_memory = MemoryAssembler(
+        messages=message_store,
+        summaries=PostgresMemorySummaryStore(db_pool),
+        compactor=memory_compactor,
+        compactor_model_label=memory_compactor_model,
+        ids=ids,
+    )
 
     return Container(
         db_pool=db_pool,
@@ -507,6 +523,7 @@ async def build_container(settings: Settings) -> Container:
             hybrid_search=chat_hybrid_search,
             query_rewriter=chat_query_rewriter,
             retrieval_gate=chat_retrieval_gate,
+            memory=chat_memory,
             buffer=stream_buffer,
             cancellation=cancellation,
             admission=budget_admission,
@@ -591,3 +608,28 @@ def _build_query_rewriter(settings: Settings) -> QueryRewritePort:
             model="claude-haiku-4-5",
         )
     return NoOpQueryRewriteAdapter()
+
+
+def _build_memory_compactor(settings: Settings) -> tuple[MemoryCompactionPort, str]:
+    """Real cheap-model compaction only if a provider key is configured
+    (issue #82, same honest-fallback posture as _build_query_rewriter) —
+    returns the port alongside the model label MemoryAssembler stamps
+    onto every MemorySummary row it writes, so a reader always knows
+    which compactor actually produced a given summary."""
+    if settings.openai_api_key:
+        return (
+            LlmMemoryCompactionAdapter(
+                provider=OpenAiCompletionAdapter(api_key=settings.openai_api_key),
+                model="gpt-4o-mini",
+            ),
+            "gpt-4o-mini",
+        )
+    if settings.anthropic_api_key:
+        return (
+            LlmMemoryCompactionAdapter(
+                provider=AnthropicCompletionAdapter(api_key=settings.anthropic_api_key),
+                model="claude-haiku-4-5",
+            ),
+            "claude-haiku-4-5",
+        )
+    return TruncatingMemoryCompactionAdapter(), TRUNCATING_MEMORY_COMPACTION_MODEL_NAME

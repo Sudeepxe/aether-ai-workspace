@@ -44,7 +44,14 @@ class EchoGenerator:
         thread_history: list[Message],
         user_content: str,
         context: RetrievedContext | None = None,
+        memory_summary: str | None = None,
     ) -> AsyncIterator[GeneratorChunk]:
+        # memory_summary accepted for interface parity (ports.chat's
+        # protocol) but not woven into the echoed reply — this
+        # generator's whole job is proving the grounding/refusal
+        # protocol's mechanics observably (see this module's docstring),
+        # not demonstrating memory quality; a real provider (app/llm/
+        # router.py) is what actually injects it into a prompt.
         reply = _build_reply(context, user_content)
         words = reply.split(" ")
         for i, word in enumerate(words):

@@ -306,6 +306,7 @@ class FakeGenerator:
         self._error = error
         self._fail_after = fail_after
         self.contexts_seen: list[RetrievedContext | None] = []
+        self.memory_summaries_seen: list[str | None] = []
 
     @property
     def primary_model(self) -> str:
@@ -317,8 +318,10 @@ class FakeGenerator:
         thread_history: list[Message],
         user_content: str,
         context: RetrievedContext | None = None,
+        memory_summary: str | None = None,
     ) -> AsyncIterator[GeneratorChunk]:
         self.contexts_seen.append(context)
+        self.memory_summaries_seen.append(memory_summary)
         for i, delta in enumerate(self._deltas):
             if self._error is not None and i == self._fail_after:
                 raise self._error
