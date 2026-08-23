@@ -1,9 +1,21 @@
 """End-to-end HTTP proof of the streaming spine (Sprint 3):
 
-- issue #26's literal acceptance criterion: a streamed echo chat e2e
-  test passes — real app, real Postgres/Redis, real SSE response.
+- issue #26's literal acceptance criterion: a streamed chat e2e test
+  passes — real app, real Postgres/Redis, real SSE response.
 - issue #25's literal acceptance criterion: a reconnect test proves
   duplicate-by-seq events are discarded on Last-Event-ID resume.
+
+Since issue #60 (S6), every chat turn runs real hybrid retrieval before
+generation — a workspace with no ingested documents always clears zero
+chunks, so Gate 1 refuses every message here (grounded=False, a single
+canned-reply token event, no citations). That's the *correct*, intended
+behavior for a document-less workspace (ADR-6.4), not a regression: the
+refusal reply still exercises the full SSE grammar/resume/idempotency
+machinery this file's tests care about, just with different content than
+the pre-#60 echo. The grounded, cited-answer path (real ingested
+document -> real chunk citations) is proven separately in
+test_grounded_chat_e2e.py, which needs the additional MinIO/ClamAV
+fixtures a plain streaming-mechanics test here doesn't.
 
 Uses httpx.AsyncClient + ASGITransport (not the sync TestClient) since
 later tests in this file need genuine concurrency; asgi-lifespan's
@@ -23,6 +35,7 @@ from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 
 from aether.config import get_settings
+from aether.ports.chat import NOT_IN_KNOWLEDGE_BASE_REPLY
 
 pytestmark = [pytest.mark.integration, pytest.mark.security]
 
@@ -97,7 +110,9 @@ def _parse_sse_frames(text: str) -> list[dict[str, Any]]:
     return frames
 
 
-async def test_echo_chat_streams_and_persists_the_reply(app_client: AsyncClient) -> None:
+async def test_chat_with_no_documents_refuses_but_streams_the_full_sse_grammar(
+    app_client: AsyncClient,
+) -> None:
     token = await _register_and_login(app_client, "chatter@example.com")
     workspace_id, thread_id = await _create_workspace_and_thread(app_client, token)
     headers = {"Authorization": f"Bearer {token}", "Accept": "text/event-stream"}
@@ -113,12 +128,17 @@ async def test_echo_chat_streams_and_persists_the_reply(app_client: AsyncClient)
     frames = _parse_sse_frames(resp.text)
     assert frames[0]["event"] == "meta"
     assert frames[0]["data"]["model"] == "echo-v1"
+    # A document-less workspace clears zero chunks — Gate 1 refuses
+    # (ADR-6.4), the correct behavior, not a regression (see module docstring).
+    assert frames[0]["data"]["grounded"] is False
     assert frames[-1]["event"] == "done"
     assert frames[-1]["data"]["status"] == "complete"
     assert frames[-2]["event"] == "usage"
+    assert frames[-2]["data"]["cost_microcents"] == 0
 
     token_deltas = "".join(f["data"]["delta"] for f in frames if f["event"] == "token")
-    assert token_deltas == "hello world"
+    assert token_deltas == NOT_IN_KNOWLEDGE_BASE_REPLY
+    assert not any(f["event"] == "citation" for f in frames)
 
     # seq is strictly monotonic and gapless across the whole SSE response.
     seqs = [int(f["id"].rsplit(":", 1)[1]) for f in frames]
@@ -131,8 +151,9 @@ async def test_echo_chat_streams_and_persists_the_reply(app_client: AsyncClient)
     assert len(items) == 2
     assistant = next(m for m in items if m["role"] == "assistant")
     user = next(m for m in items if m["role"] == "user")
-    assert assistant["content"] == "hello world"
+    assert assistant["content"] == NOT_IN_KNOWLEDGE_BASE_REPLY
     assert assistant["status"] == "complete"
+    assert assistant["grounded"] is False
     assert assistant["seq"] == user["seq"] + 1
 
 

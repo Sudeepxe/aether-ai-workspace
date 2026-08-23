@@ -1,9 +1,17 @@
-"""Postgres-backed ChunkSearchPort implementation.
+"""Postgres-backed ChunkSearchPort implementation(s).
 
-Connection-bound (see thread_repository.py's docstring for why) — used
-within SendMessage's existing per-request WorkspaceScope transaction,
-so no manual set_config/conn.transaction() here (the request already
-has app.tenant_id set and is inside one transaction).
+``PostgresChunkSearch`` is connection-bound (see thread_repository.py's
+docstring for why) — for a request-scoped caller already inside one
+transaction with ``app.tenant_id`` set, so no manual set_config/
+conn.transaction() here.
+
+``PooledChunkSearch`` is the pool-bound sibling issue #60's SendMessage
+actually uses: chat's orchestrator is a singleton built once in
+Container with only pool-bound ports (see ports.chat.MessageStorePort's
+docstring for why a streaming request can never hold WorkspaceScope's
+one connection open) — retrieval itself, unlike generation, is a
+bounded single-shot read, so a fresh short-lived connection per leg is
+safe and correct here, same pattern as adapters/postgres/message_store.py.
 
 Both legs join to ``documents`` for the filename (FR-KB-3's "doc name"
 provenance field) and restrict to READY, non-deleted documents — a
@@ -66,6 +74,29 @@ class PostgresChunkSearch:
             limit,
         )
         return [_row_to_result(row) for row in rows]
+
+
+class PooledChunkSearch:
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def search_vector(
+        self, workspace_id: UUID, *, embedding: list[float], limit: int
+    ) -> list[ChunkSearchResult]:
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
+            return await PostgresChunkSearch(conn).search_vector(
+                workspace_id, embedding=embedding, limit=limit
+            )
+
+    async def search_lexical(
+        self, workspace_id: UUID, *, query: str, limit: int
+    ) -> list[ChunkSearchResult]:
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
+            return await PostgresChunkSearch(conn).search_lexical(
+                workspace_id, query=query, limit=limit
+            )
 
 
 def _row_to_result(row: asyncpg.Record) -> ChunkSearchResult:

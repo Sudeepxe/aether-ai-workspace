@@ -3,10 +3,18 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from aether.domain.entities import Message, MessageRole, MessageStatus, Thread, UsageEvent
-from aether.ports.chat import GenerationUsage, GeneratorChunk
+from aether.domain.entities import (
+    Citation,
+    CitationDraft,
+    Message,
+    MessageRole,
+    MessageStatus,
+    Thread,
+    UsageEvent,
+)
+from aether.ports.chat import GenerationUsage, GeneratorChunk, RetrievedContext
 from aether.ports.metering import AdmissionDecision, UsageEventKind, UsageModelRollup, UsageRollup
 from aether.ports.streaming import BufferedEvent
 
@@ -97,6 +105,7 @@ class FakeMessageStore:
     def __init__(self) -> None:
         self._rows: dict[UUID, Message] = {}
         self._next_seq: dict[UUID, int] = {}
+        self._citations: dict[UUID, list[Citation]] = {}
 
     async def create(
         self,
@@ -178,6 +187,54 @@ class FakeMessageStore:
         )
         return list(reversed(newest_first))
 
+    async def persist_with_citations(
+        self,
+        *,
+        id: UUID,
+        workspace_id: UUID,
+        thread_id: UUID,
+        content: str,
+        status: MessageStatus,
+        model: str | None,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        cost_microcents: int | None,
+        citations: list[CitationDraft],
+    ) -> tuple[Message, list[Citation]]:
+        message = await self.create(
+            id=id,
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            role=MessageRole.ASSISTANT,
+            content=content,
+            status=status,
+            client_message_id=None,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_microcents=cost_microcents,
+            grounded=True,
+        )
+        created = [
+            Citation(
+                id=uuid4(),
+                workspace_id=workspace_id,
+                message_id=message.id,
+                chunk_id=draft.chunk_id,
+                document_title=draft.document_title,
+                section_path=draft.section_path,
+                page_start=draft.page_start,
+                page_end=draft.page_end,
+                created_at=datetime.now().astimezone(),
+            )
+            for draft in citations
+        ]
+        self._citations[message.id] = created
+        return message, created
+
+    async def list_citations(self, workspace_id: UUID, message_id: UUID) -> list[Citation]:
+        return [c for c in self._citations.get(message_id, []) if c.workspace_id == workspace_id]
+
 
 _DEFAULT_USAGE = GenerationUsage(
     prompt_tokens=1, completion_tokens=1, cost_microcents=100, model="fake-model"
@@ -205,14 +262,20 @@ class FakeGenerator:
         self._usage = usage
         self._error = error
         self._fail_after = fail_after
+        self.contexts_seen: list[RetrievedContext | None] = []
 
     @property
     def primary_model(self) -> str:
         return "fake-model"
 
     async def generate(
-        self, *, thread_history: list[Message], user_content: str
+        self,
+        *,
+        thread_history: list[Message],
+        user_content: str,
+        context: RetrievedContext | None = None,
     ) -> AsyncIterator[GeneratorChunk]:
+        self.contexts_seen.append(context)
         for i, delta in enumerate(self._deltas):
             if self._error is not None and i == self._fail_after:
                 raise self._error

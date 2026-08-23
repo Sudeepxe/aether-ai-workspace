@@ -21,11 +21,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 
-from aether.ports.chat import GenerationUsage, GeneratorChunk, Message, RetrievedContext
+from aether.ports.chat import (
+    NOT_IN_KNOWLEDGE_BASE_REPLY,
+    GenerationUsage,
+    GeneratorChunk,
+    Message,
+    RetrievedContext,
+)
 
 _WORD_DELAY_SECONDS = 0.02
 MODEL_NAME = "echo-v1"
-NOT_IN_KNOWLEDGE_BASE_REPLY = "I don't have information about that in the knowledge base."
 
 
 class EchoGenerator:

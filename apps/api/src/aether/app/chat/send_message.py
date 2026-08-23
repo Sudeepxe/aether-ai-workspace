@@ -6,6 +6,25 @@ here beyond handling the two things EchoGenerator never exercised: a
 generator that can actually raise (real provider failures), and a
 generator whose final usage carries a real, non-zero cost.
 
+Grounded by default since issue #60 (ADR-6.4, ADR-6.3): every non-replay
+turn runs query rewrite -> hybrid retrieval -> Gate 1 before generation.
+Gate 1 failing (no chunks, or top score below threshold) short-circuits
+straight to a canned refusal — no generator call, ``grounded=False``,
+zero citations, zero cost — matching §3.2.5's "an empty retrieval is a
+feature, not an error." Gate 1 passing calls the generator with the
+retrieved context (ADR-6.4's Gate 2 protocol) and persists one citation
+per retrieved chunk, in the same transaction as the assistant message
+(``MessageStorePort.persist_with_citations``).
+
+Retrieved chunk content is untrusted (§2's untrusted-content principle):
+it originates from uploaded documents, not the caller, so injected
+instructions inside a chunk must never override the assistant's actual
+system prompt — the grounded system prompt (app/llm/router.py's
+``_GROUNDED_SYSTEM_PROMPT``) frames chunks as data to answer from, never
+as instructions to follow. Full injection-defense tooling (e.g.
+detecting/stripping suspicious chunk content) is a later-sprint concern;
+this orchestrator's job is only to never blur that boundary itself.
+
 Budget admission (§3.2.14) happens once, before the user's turn is even
 persisted — there's no point recording a message the caller is about to
 be refused for. Settlement happens once, after generation completes,
@@ -32,9 +51,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from uuid import UUID
 
+from aether.app.retrieval.hybrid_search import HybridSearch, RankedChunk
+from aether.app.retrieval.query_rewrite import QueryRewriter
+from aether.app.retrieval.refusal_gate import RetrievalGate
 from aether.domain.entities import Message, MessageRole, MessageStatus
 from aether.domain.errors import BudgetExhaustedError
 from aether.domain.streaming import (
+    CitationStreamEvent,
     DoneStreamEvent,
     ErrorStreamEvent,
     GenerationStatus,
@@ -45,7 +68,16 @@ from aether.domain.streaming import (
     event_payload,
     event_type_name,
 )
-from aether.ports.chat import GenerationUsage, GeneratorPort, MessageStorePort
+from aether.ports.chat import (
+    NOT_IN_KNOWLEDGE_BASE_REPLY,
+    Citation,
+    CitationDraft,
+    GenerationUsage,
+    GeneratorPort,
+    MessageStorePort,
+    RetrievedContext,
+    RetrievedContextChunk,
+)
 from aether.ports.llm import ProviderError
 from aether.ports.metering import BudgetAdmissionPort, UsageEventKind, UsageLedgerPort
 from aether.ports.security import IdPort
@@ -68,6 +100,9 @@ class SendMessage:
         *,
         messages: MessageStorePort,
         generator: GeneratorPort,
+        hybrid_search: HybridSearch,
+        query_rewriter: QueryRewriter,
+        retrieval_gate: RetrievalGate,
         buffer: StreamBufferPort,
         cancellation: CancellationPort,
         admission: BudgetAdmissionPort,
@@ -78,6 +113,9 @@ class SendMessage:
     ) -> None:
         self._messages = messages
         self._generator = generator
+        self._hybrid_search = hybrid_search
+        self._query_rewriter = query_rewriter
+        self._retrieval_gate = retrieval_gate
         self._buffer = buffer
         self._cancellation = cancellation
         self._admission = admission
@@ -104,13 +142,20 @@ class SendMessage:
         if existing_user_message is not None:
             # Idempotent replay (ADR-4.6): a retried POST with the same
             # client-generated message_id must not re-persist the turn,
-            # regenerate a new reply, or re-check the budget (no new
-            # cost is incurred by a replay).
+            # regenerate a new reply, re-run retrieval, or re-check the
+            # budget (no new cost is incurred by a replay).
             existing_reply = await self._messages.find_by_seq(
                 command.workspace_id, command.thread_id, existing_user_message.seq + 1
             )
             if existing_reply is not None:
-                for event in _replay_events(existing_reply, generation_id=generation_id):
+                existing_citations = (
+                    await self._messages.list_citations(command.workspace_id, existing_reply.id)
+                    if existing_reply.grounded
+                    else []
+                )
+                for event in _replay_events(
+                    existing_reply, citations=existing_citations, generation_id=generation_id
+                ):
                     yield await buffer_and_yield(event)
                 return
         else:
@@ -137,17 +182,74 @@ class SendMessage:
         history = await self._messages.recent(
             command.workspace_id, command.thread_id, limit=_HISTORY_LIMIT
         )
-        seq = 0
+        # `history`'s last entry is the user turn just persisted above —
+        # the rewriter wants only *prior* turns to condense against.
+        dual_feed_query = await self._query_rewriter.build_dual_feed_query(
+            history=history[:-1], raw_query=command.content
+        )
+        retrieval_result = await self._hybrid_search.search(
+            command.workspace_id,
+            query=dual_feed_query.vector_query,
+            lexical_queries=dual_feed_query.lexical_queries,
+        )
+        gate_decision = self._retrieval_gate.evaluate(retrieval_result)
+        grounded = gate_decision.passed
 
+        seq = 0
         yield await buffer_and_yield(
             MetaStreamEvent(
                 generation_id=generation_id,
                 seq=seq,
                 model=self._generator.primary_model,
-                grounded=False,
+                grounded=grounded,
             )
         )
         seq += 1
+
+        if not grounded:
+            # Gate 1 refusal (ADR-6.4, §3.2.5): no chunks cleared the
+            # threshold — no generator call, no hallucination risk. A
+            # cheap, designed outcome, not an error.
+            yield await buffer_and_yield(
+                TokenStreamEvent(
+                    generation_id=generation_id, seq=seq, delta=NOT_IN_KNOWLEDGE_BASE_REPLY
+                )
+            )
+            seq += 1
+            await self._messages.persist(
+                id=self._ids.new_id(),
+                workspace_id=command.workspace_id,
+                thread_id=command.thread_id,
+                role=MessageRole.ASSISTANT,
+                content=NOT_IN_KNOWLEDGE_BASE_REPLY,
+                status=MessageStatus.COMPLETE,
+                client_message_id=None,
+                model=self._generator.primary_model,
+                prompt_tokens=0,
+                completion_tokens=0,
+                cost_microcents=0,
+                grounded=False,
+            )
+            yield await buffer_and_yield(
+                UsageStreamEvent(
+                    generation_id=generation_id,
+                    seq=seq,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    cost_microcents=0,
+                )
+            )
+            seq += 1
+            yield await buffer_and_yield(
+                DoneStreamEvent(
+                    generation_id=generation_id, seq=seq, status=GenerationStatus.COMPLETE
+                )
+            )
+            return
+
+        context = RetrievedContext(
+            chunks=[_to_context_chunk(chunk) for chunk in retrieval_result.chunks]
+        )
 
         accumulated = ""
         status = GenerationStatus.COMPLETE
@@ -163,7 +265,7 @@ class SendMessage:
         ) as cancel_sub:
             try:
                 async for chunk in self._generator.generate(
-                    thread_history=history, user_content=command.content
+                    thread_history=history, user_content=command.content, context=context
                 ):
                     if cancel_sub.is_cancelled():
                         status = GenerationStatus.CANCELLED
@@ -218,20 +320,31 @@ class SendMessage:
                 if status is GenerationStatus.COMPLETE
                 else MessageStatus.PARTIAL
             )
-            await self._messages.persist(
+            citation_drafts = [
+                CitationDraft(
+                    chunk_id=chunk.chunk_id,
+                    document_title=chunk.document_title,
+                    section_path=chunk.section_path,
+                    page_start=chunk.page_start,
+                    page_end=chunk.page_end,
+                )
+                for chunk in retrieval_result.chunks
+            ]
+            _assistant_message, created_citations = await self._messages.persist_with_citations(
                 id=self._ids.new_id(),
                 workspace_id=command.workspace_id,
                 thread_id=command.thread_id,
-                role=MessageRole.ASSISTANT,
                 content=accumulated,
                 status=assistant_status,
-                client_message_id=None,
                 model=final_model,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 cost_microcents=cost_microcents,
-                grounded=False,
+                citations=citation_drafts,
             )
+            for citation in created_citations:
+                yield await buffer_and_yield(_citation_event(citation, generation_id, seq))
+                seq += 1
             if cost_microcents > 0:
                 await self._usage_ledger.record(
                     id=self._ids.new_id(),
@@ -274,21 +387,52 @@ class SendMessage:
         )
 
 
-def _replay_events(existing_reply: Message, *, generation_id: UUID) -> list[StreamEvent]:
-    return [
+def _to_context_chunk(chunk: RankedChunk) -> RetrievedContextChunk:
+    return RetrievedContextChunk(
+        content=chunk.content, document_title=chunk.document_title, section_path=chunk.section_path
+    )
+
+
+def _citation_event(citation: Citation, generation_id: UUID, seq: int) -> CitationStreamEvent:
+    return CitationStreamEvent(
+        generation_id=generation_id,
+        seq=seq,
+        citation_id=citation.id,
+        chunk_id=citation.chunk_id,
+        document_title=citation.document_title,
+        section_path=citation.section_path,
+        page_start=citation.page_start,
+        page_end=citation.page_end,
+    )
+
+
+def _replay_events(
+    existing_reply: Message, *, citations: list[Citation], generation_id: UUID
+) -> list[StreamEvent]:
+    events: list[StreamEvent] = [
         MetaStreamEvent(
             generation_id=generation_id,
             seq=0,
             model=existing_reply.model or "unknown",
-            grounded=False,
+            grounded=existing_reply.grounded,
         ),
         TokenStreamEvent(generation_id=generation_id, seq=1, delta=existing_reply.content),
+    ]
+    seq = 2
+    for citation in citations:
+        events.append(_citation_event(citation, generation_id, seq))
+        seq += 1
+    events.append(
         UsageStreamEvent(
             generation_id=generation_id,
-            seq=2,
+            seq=seq,
             prompt_tokens=existing_reply.prompt_tokens or 0,
             completion_tokens=existing_reply.completion_tokens or 0,
             cost_microcents=existing_reply.cost_microcents or 0,
-        ),
-        DoneStreamEvent(generation_id=generation_id, seq=3, status=GenerationStatus.COMPLETE),
-    ]
+        )
+    )
+    seq += 1
+    events.append(
+        DoneStreamEvent(generation_id=generation_id, seq=seq, status=GenerationStatus.COMPLETE)
+    )
+    return events
