@@ -27,7 +27,7 @@ from aether.adapters.openai.completion import OpenAiCompletionAdapter
 from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
 from aether.adapters.postgres.audit_log import PostgresAuditLog
 from aether.adapters.postgres.budget_repository import PostgresBudgetRepository
-from aether.adapters.postgres.chunk_search import PostgresChunkSearch
+from aether.adapters.postgres.chunk_search import PooledChunkSearch
 from aether.adapters.postgres.citation_repository import PostgresCitationRepository
 from aether.adapters.postgres.document_repository import PostgresDocumentRepository
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
@@ -77,6 +77,7 @@ from aether.app.password_reset.request_password_reset import RequestPasswordRese
 from aether.app.password_reset.reset_password import ResetPassword
 from aether.app.retrieval.hybrid_search import HybridSearch
 from aether.app.retrieval.query_rewrite import QueryRewriter
+from aether.app.retrieval.refusal_gate import RetrievalGate
 from aether.app.threads.create_thread import CreateThread
 from aether.app.threads.delete_thread import DeleteThread
 from aether.app.threads.get_thread import GetThread
@@ -110,7 +111,6 @@ from aether.ports.repositories import (
     UserRepositoryPort,
     WorkspaceRepositoryPort,
 )
-from aether.ports.retrieval import ChunkSearchPort
 from aether.ports.revocation import RevocationPort
 from aether.ports.security import ClockPort, IdPort, PasswordHasherPort, TokenPort
 from aether.ports.storage import ObjectStoragePort
@@ -235,9 +235,6 @@ class WorkspaceScope:
     list_documents: ListDocuments
     get_document: GetDocument
     delete_document: DeleteDocument
-    chunk_search: ChunkSearchPort
-    hybrid_search: HybridSearch
-    query_rewriter: QueryRewriter
 
 
 def build_workspace_scope(
@@ -247,8 +244,6 @@ def build_workspace_scope(
     clock: ClockPort,
     ids: IdPort,
     object_storage: ObjectStoragePort,
-    embedder: EmbeddingProviderPort,
-    query_rewrite: QueryRewritePort,
 ) -> WorkspaceScope:
     workspaces = PostgresWorkspaceRepository(conn)
     memberships = PostgresMembershipRepository(conn)
@@ -260,7 +255,6 @@ def build_workspace_scope(
     budgets = PostgresBudgetRepository(conn)
     audit_log = PostgresAuditLog(conn)
     outbox = PostgresOutboxRepository(conn)
-    chunk_search = PostgresChunkSearch(conn)
     return WorkspaceScope(
         conn=conn,
         caller_membership=caller_membership,
@@ -301,9 +295,6 @@ def build_workspace_scope(
         list_documents=ListDocuments(documents=documents),
         get_document=GetDocument(documents=documents),
         delete_document=DeleteDocument(documents=documents, outbox=outbox, clock=clock, ids=ids),
-        chunk_search=chunk_search,
-        hybrid_search=HybridSearch(chunk_search=chunk_search, embedder=embedder),
-        query_rewriter=QueryRewriter(rewriter=query_rewrite),
     )
 
 
@@ -315,8 +306,6 @@ async def resolve_workspace_scope(
     clock: ClockPort,
     ids: IdPort,
     object_storage: ObjectStoragePort,
-    embedder: EmbeddingProviderPort,
-    query_rewrite: QueryRewritePort,
 ) -> WorkspaceScope | None:
     """Looks up the caller's membership under ``conn`` (which must already
     have ``app.tenant_id`` set to ``workspace_id`` — see
@@ -334,8 +323,6 @@ async def resolve_workspace_scope(
         clock=clock,
         ids=ids,
         object_storage=object_storage,
-        embedder=embedder,
-        query_rewrite=query_rewrite,
     )
 
 
@@ -443,6 +430,9 @@ async def build_container(settings: Settings) -> Container:
     )
     embedder = _build_embedder(settings)
     query_rewriter = _build_query_rewriter(settings)
+    chat_hybrid_search = HybridSearch(chunk_search=PooledChunkSearch(db_pool), embedder=embedder)
+    chat_query_rewriter = QueryRewriter(rewriter=query_rewriter)
+    chat_retrieval_gate = RetrievalGate(threshold=settings.retrieval_refusal_threshold)
 
     return Container(
         db_pool=db_pool,
@@ -514,6 +504,9 @@ async def build_container(settings: Settings) -> Container:
         send_message=SendMessage(
             messages=message_store,
             generator=generator,
+            hybrid_search=chat_hybrid_search,
+            query_rewriter=chat_query_rewriter,
+            retrieval_gate=chat_retrieval_gate,
             buffer=stream_buffer,
             cancellation=cancellation,
             admission=budget_admission,

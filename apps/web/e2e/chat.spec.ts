@@ -2,13 +2,23 @@ import { expect, test } from "@playwright/test";
 
 /**
  * Issue #28's literal acceptance criterion: an e2e test drives
- * login -> send message -> see streamed echo response settle.
- * Against the real stack (real API, real Postgres, real Redis) — this
- * is the one test in the whole suite that proves the frontend and
- * backend halves of the streaming spine actually work together, not
- * just independently.
+ * login -> send message -> see the streamed response settle. Against
+ * the real stack (real API, real Postgres, real Redis) — this is the
+ * one test in the whole suite that proves the frontend and backend
+ * halves of the streaming spine actually work together, not just
+ * independently.
+ *
+ * Since issue #60 (S6), every chat turn is grounded, and a freshly
+ * created workspace has no ingested documents — so the real reply here
+ * is Gate 1's refusal (ADR-6.4), not an echo. That's still a genuine,
+ * real round trip through the whole streaming spine (SSE grammar,
+ * persistence, settlement); it's just no longer literally an echo of
+ * the user's own text. The refusal string must match
+ * ports.chat.NOT_IN_KNOWLEDGE_BASE_REPLY on the backend.
  */
-test("register, log in, send a message, and see the streamed echo settle", async ({ page }) => {
+const NOT_IN_KNOWLEDGE_BASE_REPLY = "I don't have information about that in the knowledge base.";
+
+test("register, log in, send a message, and see the streamed refusal settle", async ({ page }) => {
   const email = `e2e-${Date.now()}-${Math.floor(Math.random() * 10_000)}@example.com`;
   const password = "s3cret-e2e!!";
 
@@ -32,21 +42,16 @@ test("register, log in, send a message, and see the streamed echo settle", async
   await composer.fill("hello from playwright");
   await page.getByRole("button", { name: "Send" }).click();
 
-  // The user's own message renders (seq order puts it before the
-  // reply). Scoped with .first(): EchoGenerator echoes the identical
-  // text back, so once the reply settles both bubbles match this text —
-  // asserting plain visibility (without .first()) is a real race that
-  // flakes once the round-trip is fast enough to settle before this
-  // check runs, not just a pre-existing one waiting for the assistant.
-  await expect(page.getByText("hello from playwright").first()).toBeVisible();
+  // The user's own message renders (seq order puts it before the reply).
+  await expect(page.getByText("hello from playwright")).toBeVisible();
 
-  // The streamed echo reply appears and grows — proves tokens are
-  // actually arriving incrementally, not just the final settled text.
-  await expect(page.getByText("hello from playwright").nth(1)).toBeVisible({ timeout: 10_000 });
+  // The streamed refusal reply appears — a real round trip through the
+  // whole streaming spine (Gate 1 short-circuit, SSE meta/token/usage/done,
+  // persistence), even though it's a single token rather than several.
+  await expect(page.getByText(NOT_IN_KNOWLEDGE_BASE_REPLY)).toBeVisible({ timeout: 10_000 });
 
   // Settled: the "Send" button reappears (Composer only shows "Stop"
-  // while streaming) and the reply is the full echoed content with no
-  // stray cursor indicator.
+  // while streaming) and the reply has no stray cursor indicator.
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('[aria-hidden="true"]', { hasText: "▍" })).toHaveCount(0);
 });

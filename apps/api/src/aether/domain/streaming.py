@@ -9,10 +9,16 @@ Grammar: ``meta`` (first) -> ``token``* -> ``citation``* -> ``banner``? ->
 shares one monotonic ``seq`` counter per generation, forming the SSE
 ``id:`` field as ``{generation_id}:{seq}``.
 
-``citation``/``banner`` events aren't defined yet — nothing produces them
-until grounded retrieval (S6) and provider degradation banners (S4/S6)
-exist. Their absence is a valid subsequence of the grammar above (both
-are zero-or-more/optional), not a gap in this sprint's implementation.
+``citation`` events (issue #60, ADR-8.6) follow the token stream for a
+grounded reply that cleared Gate 1 — one per retrieved chunk that fed the
+answer, emitted after the last token (or the error event, on a mid-stream
+failure) and before ``usage``. A Gate-1 refusal or an ungrounded reply
+emits zero citation events — a valid, common subsequence of the grammar
+above, not a gap.
+
+``banner`` still isn't defined yet — nothing produces it until provider
+degradation banners (a later sprint) exist. Its absence is likewise a
+valid subsequence (zero-or-more/optional).
 """
 
 from __future__ import annotations
@@ -50,6 +56,18 @@ class TokenStreamEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class CitationStreamEvent:
+    generation_id: UUID
+    seq: int
+    citation_id: UUID
+    chunk_id: UUID | None
+    document_title: str
+    section_path: str
+    page_start: int | None
+    page_end: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class UsageStreamEvent:
     generation_id: UUID
     seq: int
@@ -74,7 +92,12 @@ class DoneStreamEvent:
 
 
 StreamEvent = (
-    MetaStreamEvent | TokenStreamEvent | UsageStreamEvent | ErrorStreamEvent | DoneStreamEvent
+    MetaStreamEvent
+    | TokenStreamEvent
+    | CitationStreamEvent
+    | UsageStreamEvent
+    | ErrorStreamEvent
+    | DoneStreamEvent
 )
 
 # One source of truth for "what does each event type's SSE `event:`
@@ -89,6 +112,8 @@ def event_type_name(event: StreamEvent) -> str:
         return "meta"
     if isinstance(event, TokenStreamEvent):
         return "token"
+    if isinstance(event, CitationStreamEvent):
+        return "citation"
     if isinstance(event, UsageStreamEvent):
         return "usage"
     if isinstance(event, ErrorStreamEvent):
@@ -105,6 +130,15 @@ def event_payload(event: StreamEvent) -> dict[str, Any]:
         }
     if isinstance(event, TokenStreamEvent):
         return {"delta": event.delta}
+    if isinstance(event, CitationStreamEvent):
+        return {
+            "citation_id": str(event.citation_id),
+            "chunk_id": str(event.chunk_id) if event.chunk_id is not None else None,
+            "document_title": event.document_title,
+            "section_path": event.section_path,
+            "page_start": event.page_start,
+            "page_end": event.page_end,
+        }
     if isinstance(event, UsageStreamEvent):
         return {
             "prompt_tokens": event.prompt_tokens,

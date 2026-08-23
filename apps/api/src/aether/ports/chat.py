@@ -9,9 +9,12 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
-from aether.domain.entities import Message, MessageRole, MessageStatus
+from aether.domain.entities import Citation, CitationDraft, Message, MessageRole, MessageStatus
 
 __all__ = [
+    "NOT_IN_KNOWLEDGE_BASE_REPLY",
+    "Citation",
+    "CitationDraft",
     "GenerationUsage",
     "GeneratorChunk",
     "GeneratorPort",
@@ -22,6 +25,15 @@ __all__ = [
     "RetrievedContext",
     "RetrievedContextChunk",
 ]
+
+NOT_IN_KNOWLEDGE_BASE_REPLY = "I don't have information about that in the knowledge base."
+"""The single canonical refusal string for ADR-6.4's two-gate protocol —
+both Gate 1 (issue #60's SendMessage, short-circuiting before any
+generator call when retrieval clears no chunks/threshold) and Gate 2
+(a generator's own defense when it's somehow invoked with empty
+context anyway, e.g. adapters.echo.generator.EchoGenerator) return
+this exact string, so a refusal reads identically regardless of which
+gate produced it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,4 +168,34 @@ class MessageStorePort(Protocol):
         window. Real context *management* (windowing under a token
         budget, summarization) is the Memory Service's job (§3.2.6,
         S8); until then the orchestrator passes this straight through."""
+        ...
+
+    async def persist_with_citations(
+        self,
+        *,
+        id: UUID,
+        workspace_id: UUID,
+        thread_id: UUID,
+        content: str,
+        status: MessageStatus,
+        model: str | None,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        cost_microcents: int | None,
+        citations: list[CitationDraft],
+    ) -> tuple[Message, list[Citation]]:
+        """Persists a grounded assistant reply and its citations in one
+        transaction (ADR-8.6, issue #60) — a citation row can never
+        exist for a message that failed to persist, or vice versa.
+        Assistant-only: ``role`` is implicitly ASSISTANT,
+        ``client_message_id`` implicitly None, ``grounded`` implicitly
+        True (only a Gate-1-passed turn ever calls this — a refusal or
+        an ordinary/user message uses plain ``persist`` instead, which
+        keeps its existing default ``grounded=False``)."""
+        ...
+
+    async def list_citations(self, workspace_id: UUID, message_id: UUID) -> list[Citation]:
+        """Read path for the idempotent-replay path (``_replay_events``)
+        to re-emit a previously-persisted grounded reply's citation
+        events on reconnect/redelivery."""
         ...

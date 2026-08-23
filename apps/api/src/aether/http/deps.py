@@ -85,8 +85,6 @@ async def get_workspace_scope(
             clock=container.clock,
             ids=container.ids,
             object_storage=container.object_storage,
-            embedder=container.embedder,
-            query_rewrite=container.query_rewriter,
         )
         if scope is None:
             raise WorkspaceNotFoundError(str(workspace_id))

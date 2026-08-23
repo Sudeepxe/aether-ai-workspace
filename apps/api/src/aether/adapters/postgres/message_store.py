@@ -9,8 +9,9 @@ from uuid import UUID
 
 import asyncpg
 
+from aether.adapters.postgres.citation_repository import PostgresCitationRepository
 from aether.adapters.postgres.message_repository import PostgresMessageRepository
-from aether.ports.chat import Message, MessageRole, MessageStatus
+from aether.ports.chat import Citation, CitationDraft, Message, MessageRole, MessageStatus
 
 
 class PostgresMessageStore:
@@ -71,3 +72,43 @@ class PostgresMessageStore:
                 workspace_id, thread_id, after_seq=None, limit=limit
             )
             return list(reversed(newest_first))
+
+    async def persist_with_citations(
+        self,
+        *,
+        id: UUID,
+        workspace_id: UUID,
+        thread_id: UUID,
+        content: str,
+        status: MessageStatus,
+        model: str | None,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        cost_microcents: int | None,
+        citations: list[CitationDraft],
+    ) -> tuple[Message, list[Citation]]:
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
+            message = await PostgresMessageRepository(conn).create(
+                id=id,
+                workspace_id=workspace_id,
+                thread_id=thread_id,
+                role=MessageRole.ASSISTANT,
+                content=content,
+                status=status,
+                client_message_id=None,
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost_microcents=cost_microcents,
+                grounded=True,
+            )
+            created_citations = await PostgresCitationRepository(conn).create_many(
+                workspace_id, message.id, citations
+            )
+            return message, created_citations
+
+    async def list_citations(self, workspace_id: UUID, message_id: UUID) -> list[Citation]:
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
+            return await PostgresCitationRepository(conn).list_by_message(workspace_id, message_id)

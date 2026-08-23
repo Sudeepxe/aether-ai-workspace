@@ -13,27 +13,47 @@ aspirational (Ch.3 self-review F-3). This test proves it by partially
 reading replica A's stream, resuming (also partially) from replica B,
 cancelling from replica B, and then checking replica A's generation
 actually terminates as cancelled with a shorter-than-full reply.
+
+Since issue #60 (S6), every chat turn is grounded — a document is
+ingested first (real pipeline, same as test_grounded_chat_e2e.py) so
+EchoGenerator's grounded reply has real multi-word content to stream
+over real wall-clock time; a document-less workspace's single-token
+refusal reply would complete before either replica could read more than
+one frame, defeating this test's whole premise.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+import asyncpg
+import httpx
 import pytest
 import redis.asyncio as redis_asyncio
 import uvicorn
 from fastapi import FastAPI
 from httpx import AsyncClient
 
+from aether.adapters.clamav.scanner import ClamAvScanner
+from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
+from aether.adapters.minio.object_storage import MinioObjectStorage
+from aether.adapters.postgres.ingestion_repository import PostgresIngestionRepository
+from aether.app.ingestion.process_document import DocumentProcessor
 from aether.config import get_settings
+from aether.ports.ingestion_queue import QueuedMessage
 
 pytestmark = [pytest.mark.integration, pytest.mark.security]
 
 _TIMEOUT_SECONDS = 20.0
-_WORD_COUNT = 50
+_CHUNK_WORD_COUNT = 56
+# EchoGenerator's grounded reply prefixes the chunk content with
+# "Grounded on: {title} ({section}): " (4 more space-split words) — see
+# adapters/echo/generator.py's _build_reply.
+_WORD_COUNT = _CHUNK_WORD_COUNT + 4
 
 
 def _as_app_api_url(bootstrap_url: str) -> str:
@@ -112,6 +132,60 @@ async def _create_workspace_and_thread(client: AsyncClient, token: str) -> tuple
     return workspace_id, thread_id
 
 
+async def _ingest_document(
+    *,
+    workspace_id: uuid.UUID,
+    db_bootstrap_pool: asyncpg.Pool,
+    worker_db_pool: asyncpg.Pool,
+    object_storage: MinioObjectStorage,
+    clamav_endpoint: tuple[str, int],
+) -> None:
+    """Real ingestion (issue #46/#48), trimmed down from
+    test_grounded_chat_e2e.py's version — this test only needs *a*
+    ready chunk with enough words to stream, not specific content."""
+    document_id = uuid.uuid4()
+    key = f"{workspace_id}/{document_id}"
+    content = (
+        "# Streaming filler\n\n" + " ".join(f"filler{i}" for i in range(_CHUNK_WORD_COUNT))
+    ).encode()
+    async with db_bootstrap_pool.acquire() as conn:
+        await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
+        await conn.execute(
+            "INSERT INTO documents (id, workspace_id, filename, content_sha256, mime, "
+            "size_bytes, object_key) VALUES ($1, $2, 'filler.md', 'x', 'text/markdown', $3, $4)",
+            document_id,
+            workspace_id,
+            len(content),
+            key,
+        )
+
+    presigned = object_storage.presign_upload(
+        key=key, content_type="text/markdown", max_size_bytes=len(content) + 10, expires_seconds=900
+    )
+    files = {"file": ("filler.md", content, "text/markdown")}
+    upload_resp = httpx.post(presigned.url, data=presigned.fields, files=files, timeout=10.0)
+    assert upload_resp.status_code in (200, 204), upload_resp.text
+
+    host, port = clamav_endpoint
+    processor = DocumentProcessor(
+        object_storage=object_storage,
+        scanner=ClamAvScanner(host=host, port=port),
+        repository=PostgresIngestionRepository(worker_db_pool),
+        embedder=LocalHashEmbeddingAdapter(),
+    )
+    await processor(
+        QueuedMessage(
+            stream_message_id="1-0",
+            tenant_id=workspace_id,
+            payload={"document_id": str(document_id), "object_key": key, "mime": "text/markdown"},
+            delivery_count=1,
+        )
+    )
+    async with db_bootstrap_pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM documents WHERE id = $1", document_id)
+    assert status == "ready", f"fixture document failed to ingest: status={status}"
+
+
 def _parse_sse_block(block: str) -> dict[str, Any] | None:
     if not block.strip() or block.startswith(":"):
         return None
@@ -165,18 +239,30 @@ async def _read_frames_until(
 
 async def test_resume_and_cancel_both_work_across_a_different_replica(
     two_replicas: tuple[AsyncClient, AsyncClient],
+    worker_db_pool: asyncpg.Pool,
+    db_bootstrap_pool: asyncpg.Pool,
+    object_storage: MinioObjectStorage,
+    clamav_endpoint: tuple[str, int],
 ) -> None:
     client_a, client_b = two_replicas
     token = await _register_and_login(client_a, "multireplica@example.com")
     workspace_id, thread_id = await _create_workspace_and_thread(client_a, token)
+    await _ingest_document(
+        workspace_id=uuid.UUID(workspace_id),
+        db_bootstrap_pool=db_bootstrap_pool,
+        worker_db_pool=worker_db_pool,
+        object_storage=object_storage,
+        clamav_endpoint=clamav_endpoint,
+    )
     url = f"/v1/workspaces/{workspace_id}/threads/{thread_id}/messages"
     headers = {"Authorization": f"Bearer {token}", "Accept": "text/event-stream"}
-    # Enough words that generation takes real wall-clock time (~1s at
-    # EchoGenerator's 20ms/word) — plenty of runway to read a few frames
-    # from two different replicas and still cancel well before natural
-    # completion.
+    # The reply's word count now comes from the ingested chunk's content
+    # (EchoGenerator echoes retrieved context, not the user's own
+    # message, since #60) — ~_WORD_COUNT words is enough real wall-clock
+    # time at EchoGenerator's 20ms/word to read a few frames from two
+    # different replicas and still cancel well before natural completion.
     body = {
-        "content": " ".join(f"word{i}" for i in range(_WORD_COUNT)),
+        "content": "Tell me about the filler content.",
         "client_message_id": "cmid-multi-replica",
     }
 

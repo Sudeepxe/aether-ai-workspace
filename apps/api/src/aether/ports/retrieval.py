@@ -5,10 +5,12 @@ app/retrieval/hybrid_search.py per ADR-6.1 ("no orchestration
 framework... own plumbing"), the same adapter-does-I/O /
 app-does-algorithm split ADR-6.2's chunking already established.
 
-Connection-bound (not pool-bound): called from within SendMessage's
-existing per-request WorkspaceScope transaction (issue #60), the same
-lifecycle as ThreadRepositoryPort/DocumentRepositoryPort, not the
-worker's pool-per-call pattern.
+Two adapters implement this protocol (adapters/postgres/chunk_search.py):
+a connection-bound ``PostgresChunkSearch`` for request-scoped callers
+already inside one transaction, and a pool-bound ``PooledChunkSearch``
+for issue #60's SendMessage — chat's orchestrator is a singleton with
+no per-request connection to share (see ports.chat.MessageStorePort's
+docstring for why a streaming request can never hold one open).
 """
 
 from __future__ import annotations
