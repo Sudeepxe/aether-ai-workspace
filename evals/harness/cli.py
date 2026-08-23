@@ -1,18 +1,30 @@
 """Entry point: ``PYTHONPATH=../.. uv run python -m evals.harness.cli run``
-from ``apps/api`` (or via ``make eval`` once issue #72 adds it) —
-``PYTHONPATH=../..`` puts the repo root on the path so ``evals.*``
-resolves, while ``aether.*`` resolves from apps/api's own venv as
-usual. Connects to whatever real Postgres/Redis/MinIO/ClamAV the
+from ``apps/api`` (or via ``make eval``/CI's eval-smoke and eval-nightly
+jobs, issue #72) — ``PYTHONPATH=../..`` puts the repo root on the path
+so ``evals.*`` resolves, while ``aether.*`` resolves from apps/api's own
+venv as usual. Connects to whatever real Postgres/Redis/MinIO/ClamAV the
 standard ``AETHER_*`` env vars point at (same variables/defaults
 ``aether.config.Settings`` already reads everywhere else), runs the
 golden set through the real HTTP app in-process, and prints a summary.
+
+Exit code gates on regression (issue #72's "gates merge on regression"):
+this golden set's real, verified baseline (issue #70) is 100% on every
+mechanical metric — refusal correctness, retrieval hit-rate, citation
+precision, citation recall. Any drop below that on *this* set is a real
+regression, not noise, so the default exit code reflects it. Faithfulness/
+adversarial-safety never gate (they're honestly not measured in this
+environment) and neither does any future golden-set growth that isn't
+yet at 100% by design — this threshold is meaningful specifically
+because v1's cases were built to have a clean, no-ambiguity answer.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import asyncpg
@@ -23,11 +35,12 @@ from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.postgres.pool import _init_connection
 from aether.config import get_settings
 from evals.harness.judge import FaithfulnessStatus, FaithfulnessVerdict, judge_case_faithfulness
-from evals.harness.metrics import AggregateMetrics, aggregate, score_case
+from evals.harness.metrics import AggregateMetrics, CaseMetrics, aggregate, score_case
 from evals.harness.runner import run_golden_set
 from evals.harness.schema import load_golden_set
 
 DEFAULT_GOLDEN_DIR = Path(__file__).resolve().parents[1] / "golden" / "v1"
+_REQUIRED_RATE = 1.0
 
 
 def _print_summary(agg: AggregateMetrics, faithfulness: list[FaithfulnessVerdict]) -> None:
@@ -58,7 +71,35 @@ def _format_faithfulness(verdicts: list[FaithfulnessVerdict]) -> str:
     return "not measured — no grounded turns to judge"
 
 
-async def _run(golden_dir: Path) -> int:
+def _regressions(agg: AggregateMetrics) -> list[str]:
+    problems = []
+    if agg.refusal_correctness_rate < _REQUIRED_RATE:
+        problems.append(f"refusal correctness {agg.refusal_correctness_rate:.1%} < 100%")
+    if agg.retrieval_hit_rate is not None and agg.retrieval_hit_rate < _REQUIRED_RATE:
+        problems.append(f"retrieval hit rate {agg.retrieval_hit_rate:.1%} < 100%")
+    if agg.citation_precision_mean is not None and agg.citation_precision_mean < _REQUIRED_RATE:
+        problems.append(f"citation precision {agg.citation_precision_mean:.1%} < 100%")
+    if agg.citation_recall_mean is not None and agg.citation_recall_mean < _REQUIRED_RATE:
+        problems.append(f"citation recall {agg.citation_recall_mean:.1%} < 100%")
+    return problems
+
+
+def _write_report_json(
+    path: Path,
+    *,
+    case_metrics: list[CaseMetrics],
+    agg: AggregateMetrics,
+    faithfulness: list[FaithfulnessVerdict],
+) -> None:
+    payload = {
+        "cases": [asdict(c) for c in case_metrics],
+        "aggregate": asdict(agg),
+        "faithfulness": [asdict(v) for v in faithfulness],
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str))
+
+
+async def _run(golden_dir: Path, report_json: Path | None) -> int:
     settings = get_settings()
     cases = load_golden_set(golden_dir)
     if not cases:
@@ -120,22 +161,42 @@ async def _run(golden_dir: Path) -> int:
     case_metrics = [score_case(r) for r in results]
     agg = aggregate(case_metrics)
     _print_summary(agg, faithfulness)
+    if report_json is not None:
+        _write_report_json(
+            report_json, case_metrics=case_metrics, agg=agg, faithfulness=faithfulness
+        )
+        print(f"\nwrote {report_json}")
 
+    exit_code = 0
     failed = [c for c in case_metrics if not c.ran_successfully]
     if failed:
         print(f"\n{len(failed)} case(s) failed to run:", file=sys.stderr)
         for c in failed:
             print(f"  {c.case_id}: {c.error}", file=sys.stderr)
-        return 1
-    return 0
+        exit_code = 1
+
+    regressions = _regressions(agg)
+    if regressions:
+        print("\nregression(s) against this golden set's verified baseline:", file=sys.stderr)
+        for r in regressions:
+            print(f"  {r}", file=sys.stderr)
+        exit_code = 1
+
+    return exit_code
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Aether eval harness golden set")
     parser.add_argument("command", choices=["run"])
     parser.add_argument("--golden-dir", type=Path, default=DEFAULT_GOLDEN_DIR)
+    parser.add_argument(
+        "--report-json",
+        type=Path,
+        default=None,
+        help="write a machine-readable report to this path",
+    )
     args = parser.parse_args()
-    exit_code = asyncio.run(_run(args.golden_dir))
+    exit_code = asyncio.run(_run(args.golden_dir, args.report_json))
     raise SystemExit(exit_code)
 
 

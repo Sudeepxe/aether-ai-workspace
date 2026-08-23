@@ -1,10 +1,71 @@
-# Nightly full eval (150 cases, §6.4). Skeleton — ENABLED IN S7.
+# Nightly full eval run (Blueprint §6.4's "nightly full" tier) — runs
+# unconditionally (no path filter, unlike ci.yml's eval-smoke), against
+# the same real infra/harness/golden set, and uploads a report artifact
+# for trend tracking. At v1's size (20 cases) this runs the same set
+# eval-smoke does — the smoke/nightly *case-count* distinction becomes
+# meaningful once the golden set grows toward the blueprint's ~150-case
+# steady-state target (issue #70's README documents this honestly).
+
 name: eval-nightly
+
 on:
-  schedule: [{ cron: "0 3 * * *" }]
-  workflow_dispatch:
+  schedule:
+    - cron: "17 7 * * *" # 07:17 UTC daily — an arbitrary off-peak minute, not :00, to avoid GitHub's shared-minute scheduling congestion
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
 jobs:
-  full-eval:
-    if: ${{ false }}   # ENABLED IN S7 — requires evals/harness + budgeted provider keys
+  eval-nightly:
     runs-on: ubuntu-latest
-    steps: [{ run: "echo enabled in S7" }]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - name: Start dev infra (Postgres, Redis, MinIO, ClamAV)
+        run: |
+          docker compose -f infra/compose/compose.yml --profile dev up -d --wait \
+            postgres redis minio clamav
+      - name: Migrate + provision the bucket
+        working-directory: apps/api
+        env:
+          AETHER_DATABASE_MIGRATOR_URL: postgresql://aether:aether-dev-only@localhost:5432/aether
+        run: |
+          uv sync
+          uv run alembic upgrade head
+          uv run python -c "
+          import asyncio
+          from aether.adapters.minio.object_storage import MinioObjectStorage
+          from aether.config import get_settings
+          s = get_settings()
+          asyncio.run(MinioObjectStorage(
+              endpoint=s.object_storage_endpoint, access_key=s.object_storage_access_key,
+              secret_key=s.object_storage_secret_key, secure=s.object_storage_secure,
+              bucket=s.object_storage_bucket,
+          ).ensure_bucket())
+          "
+      - name: Run the full golden set
+        working-directory: apps/api
+        env:
+          PYTHONPATH: ../..
+          AETHER_DATABASE_URL: postgresql://app_api:app-api-dev-only@localhost:5432/aether
+          AETHER_DATABASE_MIGRATOR_URL: postgresql://aether:aether-dev-only@localhost:5432/aether
+          AETHER_DATABASE_WORKER_URL: postgresql://app_worker:app-worker-dev-only@localhost:5432/aether
+          AETHER_REDIS_URL: redis://localhost:6379/0
+          AETHER_JWT_SIGNING_KEY: "ENa+PofIf23y5gFynYezonUkV5iu0pgeEe/PHlqCG4E=" # gitleaks:allow
+          AETHER_JWT_KID: dev-1
+          # Real provider keys, if this repo's secrets ever configure
+          # them (they don't today) — the harness's own judge.py honestly
+          # reports not_measured/skipped_same_family otherwise, never a
+          # fabricated faithfulness score.
+          AETHER_OPENAI_API_KEY: ${{ secrets.AETHER_OPENAI_API_KEY }}
+          AETHER_ANTHROPIC_API_KEY: ${{ secrets.AETHER_ANTHROPIC_API_KEY }}
+        run: uv run python -m evals.harness.cli run --report-json /tmp/eval-nightly-report.json
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: eval-nightly-report-${{ github.run_id }}
+          path: /tmp/eval-nightly-report.json
+          retention-days: 90
+          if-no-files-found: ignore
