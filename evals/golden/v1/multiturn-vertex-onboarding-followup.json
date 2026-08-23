@@ -1,0 +1,20 @@
+{
+  "id": "multiturn-vertex-onboarding-followup",
+  "case_class": "multi_turn",
+  "corpus_files": ["vertex-onboarding.md"],
+  "turns": [
+    {
+      "query": "What happens during a new hire's first week at Vertex?",
+      "expect_grounded": true,
+      "expect_gold_document": "vertex-onboarding.md",
+      "expect_gold_section_contains": "Vertex"
+    },
+    {
+      "query": "Who do they meet with on the second day specifically?",
+      "expect_grounded": true,
+      "expect_gold_document": "vertex-onboarding.md",
+      "expect_gold_section_contains": "Vertex"
+    }
+  ],
+  "rubric": "The second turn's 'they' must resolve to a new Vertex hire via query rewrite — the reply should mention the peer 'buddy', not a generic answer."
+}

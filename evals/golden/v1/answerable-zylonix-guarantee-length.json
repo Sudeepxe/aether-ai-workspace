@@ -1,0 +1,14 @@
+{
+  "id": "answerable-zylonix-guarantee-length",
+  "case_class": "answerable",
+  "corpus_files": ["zylonix-support-policy.md"],
+  "turns": [
+    {
+      "query": "What is Zylonix's money-back guarantee period?",
+      "expect_grounded": true,
+      "expect_gold_document": "zylonix-support-policy.md",
+      "expect_gold_section_contains": "Zylonix"
+    }
+  ],
+  "rubric": "The reply must state 45 days and must not confuse it with a different vendor's policy."
+}

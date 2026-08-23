@@ -20,6 +20,7 @@ from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 
 from aether.adapters.minio.object_storage import MinioObjectStorage
+from aether.adapters.postgres.pool import _init_connection
 from aether.config import get_settings
 from evals.harness.metrics import AggregateMetrics, aggregate, score_case
 from evals.harness.runner import run_golden_set
@@ -49,10 +50,19 @@ async def _run(golden_dir: Path) -> int:
         print(f"no golden cases found under {golden_dir}", file=sys.stderr)
         return 1
 
+    # asyncpg.create_pool directly (not adapters.postgres.pool.create_pool,
+    # which is single-URL) since the harness needs two distinct roles —
+    # same pattern apps/api/tests/integration/conftest.py's
+    # db_bootstrap_pool/worker_db_pool fixtures already use. init=
+    # _init_connection registers the pgvector codec — without it, a
+    # chunk's embedding (a Python list) can't bind to the `vector` column
+    # asyncpg sees.
     bootstrap_pool = await asyncpg.create_pool(
-        settings.database_migrator_url, min_size=1, max_size=4
+        settings.database_migrator_url, min_size=1, max_size=4, init=_init_connection
     )
-    worker_pool = await asyncpg.create_pool(settings.database_worker_url, min_size=1, max_size=4)
+    worker_pool = await asyncpg.create_pool(
+        settings.database_worker_url, min_size=1, max_size=4, init=_init_connection
+    )
     object_storage = MinioObjectStorage(
         endpoint=settings.object_storage_endpoint,
         access_key=settings.object_storage_access_key,

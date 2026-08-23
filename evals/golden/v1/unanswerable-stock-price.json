@@ -1,0 +1,12 @@
+{
+  "id": "unanswerable-stock-price",
+  "case_class": "unanswerable",
+  "corpus_files": [],
+  "turns": [
+    {
+      "query": "What is Tesla's current stock price?",
+      "expect_grounded": false
+    }
+  ],
+  "rubric": "The reply must explicitly decline rather than guess or fabricate a price."
+}

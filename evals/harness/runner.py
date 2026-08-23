@@ -30,6 +30,15 @@ class TurnResult:
     grounded: bool
     content: str
     citations: list[dict[str, Any]]
+    model: str = "unknown"
+    """The SSE ``meta`` event's model label — ``"echo-v1"`` when no real
+    provider key is configured (this environment's actual state), a real
+    provider's model id otherwise. metrics.py's adversarial-safety check
+    is gated on this: EchoGenerator echoes retrieved chunk content
+    verbatim by design (including any embedded injection payload), so a
+    trigger phrase appearing in its reply reflects normal, correct
+    echo behavior, not a compromised generator — see metrics.py's
+    docstring."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,25 +64,37 @@ def _parse_sse_frames(text: str) -> list[dict[str, Any]]:
     return frames
 
 
+async def register_harness_user(client: httpx.AsyncClient) -> dict[str, str]:
+    """One user, registered once per run — not per case. The AUTH rate
+    limit class (10 req/60s per IP, http/rate_limit_deps.py) exists to
+    stop brute-forcing register/login from one source; a harness that
+    re-registered per case would trip it after ~5 cases (a real 429, not
+    a harness bug) since every in-process ASGI call shares one apparent
+    IP. A case's isolation comes from its own fresh *workspace*, not a
+    fresh user — reusing one authenticated session across the whole
+    golden set is both correct and realistic (a real eval run is one
+    authenticated actor, not N)."""
+    email = f"eval-harness-{uuid.uuid4().hex[:12]}@example.com"
+    await client.post(
+        "/v1/auth/register",
+        json={"email": email, "password": _PASSWORD, "display_name": "Eval Harness"},
+    )
+    login = await client.post("/v1/auth/login", json={"email": email, "password": _PASSWORD})
+    token = login.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 async def run_case(
     case: GoldenCase,
     *,
     client: httpx.AsyncClient,
+    headers: dict[str, str],
     bootstrap_pool: asyncpg.Pool,
     worker_pool: asyncpg.Pool,
     object_storage: Any,
     clamav_endpoint: tuple[str, int],
 ) -> CaseResult:
     try:
-        email = f"eval-{case.id}-{uuid.uuid4().hex[:8]}@example.com"
-        await client.post(
-            "/v1/auth/register",
-            json={"email": email, "password": _PASSWORD, "display_name": case.id},
-        )
-        login = await client.post("/v1/auth/login", json={"email": email, "password": _PASSWORD})
-        token = login.json()["access_token"]
-        headers = {"Authorization": f"Bearer {token}"}
-
         ws_resp = await client.post("/v1/workspaces", json={"name": case.id}, headers=headers)
         workspace_id = ws_resp.json()["id"]
         thread_resp = await client.post(
@@ -109,6 +130,7 @@ async def run_case(
                     grounded=meta["grounded"],
                     content=token_deltas,
                     citations=citation_frames,
+                    model=meta["model"],
                 )
             )
         return CaseResult(case=case, turns=turn_results)
@@ -129,12 +151,14 @@ async def run_golden_set(
     clamav_endpoint: tuple[str, int],
     log: Any = None,
 ) -> list[CaseResult]:
+    headers = await register_harness_user(client)
     results: list[CaseResult] = []
     for case in cases:
         started = time.monotonic()
         result = await run_case(
             case,
             client=client,
+            headers=headers,
             bootstrap_pool=bootstrap_pool,
             worker_pool=worker_pool,
             object_storage=object_storage,

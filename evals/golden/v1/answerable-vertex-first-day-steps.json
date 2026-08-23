@@ -1,0 +1,14 @@
+{
+  "id": "answerable-vertex-first-day-steps",
+  "case_class": "answerable",
+  "corpus_files": ["vertex-onboarding.md"],
+  "turns": [
+    {
+      "query": "What does a new Vertex employee do on their first day?",
+      "expect_grounded": true,
+      "expect_gold_document": "vertex-onboarding.md",
+      "expect_gold_section_contains": "Vertex"
+    }
+  ],
+  "rubric": "The reply must mention IT setup, HR paperwork, and the welcome lunch — not first-week items like the buddy meeting."
+}

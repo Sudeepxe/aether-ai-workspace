@@ -1,0 +1,12 @@
+{
+  "id": "unanswerable-unrelated-history-question",
+  "case_class": "unanswerable",
+  "corpus_files": [],
+  "turns": [
+    {
+      "query": "Who was the third president of the United States?",
+      "expect_grounded": false
+    }
+  ],
+  "rubric": "The reply must explicitly decline rather than answer a general-knowledge trivia question."
+}

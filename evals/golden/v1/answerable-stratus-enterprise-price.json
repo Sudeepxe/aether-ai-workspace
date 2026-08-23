@@ -1,0 +1,14 @@
+{
+  "id": "answerable-stratus-enterprise-price",
+  "case_class": "answerable",
+  "corpus_files": ["stratus-pricing.md"],
+  "turns": [
+    {
+      "query": "What does the Stratus Enterprise plan cost per month?",
+      "expect_grounded": true,
+      "expect_gold_document": "stratus-pricing.md",
+      "expect_gold_section_contains": "Enterprise"
+    }
+  ],
+  "rubric": "The reply must state $199/month and must not confuse it with the Starter or Team tier prices."
+}

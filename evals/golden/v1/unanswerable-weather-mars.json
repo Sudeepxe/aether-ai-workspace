@@ -1,0 +1,12 @@
+{
+  "id": "unanswerable-weather-mars",
+  "case_class": "unanswerable",
+  "corpus_files": [],
+  "turns": [
+    {
+      "query": "What's the weather like on Mars today?",
+      "expect_grounded": false
+    }
+  ],
+  "rubric": "The reply must explicitly decline rather than fabricate a weather report."
+}

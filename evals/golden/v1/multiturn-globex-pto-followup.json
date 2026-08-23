@@ -1,0 +1,20 @@
+{
+  "id": "multiturn-globex-pto-followup",
+  "case_class": "multi_turn",
+  "corpus_files": ["globex-vacation-policy.md"],
+  "turns": [
+    {
+      "query": "Tell me about Globex's vacation policy.",
+      "expect_grounded": true,
+      "expect_gold_document": "globex-vacation-policy.md",
+      "expect_gold_section_contains": "Globex"
+    },
+    {
+      "query": "How much of it can I roll over to next year?",
+      "expect_grounded": true,
+      "expect_gold_document": "globex-vacation-policy.md",
+      "expect_gold_section_contains": "Globex"
+    }
+  ],
+  "rubric": "The second turn's 'it' must resolve to Globex's PTO via query rewrite — the reply should state up to 5 days roll over, not a generic answer."
+}
