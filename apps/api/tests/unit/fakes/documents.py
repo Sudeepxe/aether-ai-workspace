@@ -111,3 +111,8 @@ class FakeDocumentObjectStorage:
 
     async def download(self, *, key: str) -> bytes:  # pragma: no cover - unused by these use cases
         raise NotImplementedError
+
+    async def upload(
+        self, *, key: str, content: bytes, content_type: str
+    ) -> None:  # pragma: no cover - unused by these use cases
+        raise NotImplementedError

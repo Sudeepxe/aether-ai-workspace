@@ -23,6 +23,9 @@ class FakeObjectStorage:
     async def delete(self, *, key: str) -> None:
         self._objects.pop(key, None)
 
+    async def upload(self, *, key: str, content: bytes, content_type: str) -> None:
+        self._objects[key] = content
+
     def presign_upload(self, **kwargs: object) -> object:  # pragma: no cover - unused by handler
         raise NotImplementedError
 

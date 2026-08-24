@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
-from aether.domain.entities import DeletionJobStatus, MembershipRole
+from aether.domain.entities import DeletionJobStatus, ExportJobStatus, MembershipRole
 
 
 class CreateWorkspaceRequest(BaseModel):
@@ -36,6 +36,19 @@ class DeletionJobResponse(BaseModel):
     status: DeletionJobStatus
     evidence: dict[str, Any]
     failure_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+
+
+class ExportJobResponse(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    requested_by: UUID
+    status: ExportJobStatus
+    evidence: dict[str, Any]
+    failure_reason: str | None
+    download_url: str | None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None

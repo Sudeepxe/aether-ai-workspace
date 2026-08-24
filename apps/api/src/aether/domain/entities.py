@@ -439,3 +439,38 @@ class DeletionJob:
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
+
+
+class ExportJobStatus(StrEnum):
+    """A tenant-data-export saga's progress (FR-AD-5, §8.1) — same
+    four-value shape as ``DeletionJobStatus``, tracked separately since
+    export and deletion are independent sagas over independent jobs
+    tables (§7.3's RBAC matrix also gates them identically: both are
+    Owner-only "workspace delete/export/transfer")."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class ExportJob:
+    """One tenant-data-export saga run (FR-AD-5, §8.1). ``archive_object_key``
+    is set only once the saga completes — the object storage key of the
+    assembled JSON+originals zip, used to mint a short-lived presigned
+    download URL (ADR-3.8: never a permanent public link). Unlike
+    ``DeletionJob``, this table keeps its normal FK to ``workspaces``
+    (ON DELETE CASCADE) — an export job has no reason to survive the
+    workspace it's a snapshot of."""
+
+    id: UUID
+    workspace_id: UUID
+    requested_by: UUID
+    status: ExportJobStatus
+    archive_object_key: str | None
+    evidence: dict[str, Any]
+    failure_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None

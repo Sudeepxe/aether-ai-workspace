@@ -9,6 +9,7 @@ addressed keys + presigned URLs" design's own portability intent).
 from __future__ import annotations
 
 import asyncio
+import io
 from datetime import UTC, datetime, timedelta
 
 from minio import Minio
@@ -88,6 +89,18 @@ class MinioObjectStorage:
                 response.release_conn()
 
         return await asyncio.to_thread(_get)
+
+    async def upload(self, *, key: str, content: bytes, content_type: str) -> None:
+        def _put() -> None:
+            self._client.put_object(
+                self._bucket,
+                key,
+                io.BytesIO(content),
+                length=len(content),
+                content_type=content_type,
+            )
+
+        await asyncio.to_thread(_put)
 
     async def ensure_bucket(self) -> None:
         """Idempotent bucket provisioning, called once at process

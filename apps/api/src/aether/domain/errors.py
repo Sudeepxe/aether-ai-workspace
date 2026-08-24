@@ -131,3 +131,7 @@ class DeletionJobNotFoundError(DomainError):
     the caller's own membership, so this is also what a poll racing the
     saga's completion looks like from the outside; see the deletion_jobs
     migration's docstring)."""
+
+
+class ExportJobNotFoundError(DomainError):
+    """Referenced export job id does not exist in this workspace."""

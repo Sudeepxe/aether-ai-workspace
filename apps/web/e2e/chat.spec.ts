@@ -92,4 +92,27 @@ test("register, log in, send a message, and see the streamed refusal settle", as
     "true",
     { timeout: 10_000 },
   );
+
+  // Issue #85's literal acceptance criterion: "real browser verification
+  // of the request -> poll -> download flow" for tenant data export
+  // (FR-AD-5). This test's user is the workspace's sole Owner (CreateWorkspace's
+  // real behavior), so the Owner-only backend gate (§7.3) is satisfied
+  // without a second session. Reuses the same authenticated session as
+  // everything above, for the same AUTH-rate-limit reason documented
+  // above.
+  await page.getByRole("button", { name: "Export data" }).click();
+  await expect(page.getByText("Preparing export…")).toBeVisible();
+  const downloadLink = page.getByRole("link", { name: "Download export" });
+  await expect(downloadLink).toBeVisible({ timeout: 20_000 });
+  const downloadUrl = await downloadLink.getAttribute("href");
+  expect(downloadUrl).not.toBeNull();
+
+  // The presigned URL is genuinely fetchable against real MinIO — a
+  // real archive, not just a URL-shaped string in the DOM.
+  const archiveResponse = await page.request.get(downloadUrl as string);
+  expect(archiveResponse.ok()).toBe(true);
+  const archiveBytes = await archiveResponse.body();
+  // ZIP local-file-header magic bytes ("PK\x03\x04") — proves this is a
+  // real archive, not an empty or error body.
+  expect(archiveBytes.subarray(0, 4).toString("latin1")).toBe("PK\x03\x04");
 });

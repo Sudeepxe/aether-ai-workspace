@@ -57,3 +57,11 @@ class ObjectStoragePort(Protocol):
         place that legitimately needs the actual bytes to scan/parse
         them)."""
         ...
+
+    async def upload(self, *, key: str, content: bytes, content_type: str) -> None:
+        """Writes bytes directly — worker-only, the server-side
+        counterpart to ``presign_upload``'s client-driven flow. The
+        workspace-export saga (issue #85) is the one place the worker
+        itself produces a new object (an assembled archive) rather than
+        just reading or removing one that a client uploaded."""
+        ...

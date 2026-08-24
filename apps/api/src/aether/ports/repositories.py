@@ -24,6 +24,8 @@ from aether.domain.entities import (
     DeletionJobStatus,
     Document,
     DocumentStatus,
+    ExportJob,
+    ExportJobStatus,
     Feedback,
     FeedbackRating,
     Invitation,
@@ -52,6 +54,9 @@ __all__ = [
     "DocumentRepositoryPort",
     "DocumentStatus",
     "EmailAlreadyRegisteredError",
+    "ExportJob",
+    "ExportJobRepositoryPort",
+    "ExportJobStatus",
     "Feedback",
     "FeedbackRating",
     "FeedbackRepositoryPort",
@@ -153,6 +158,18 @@ class DeletionJobRepositoryPort(Protocol):
     async def create(self, *, id: UUID, workspace_id: UUID, requested_by: UUID) -> DeletionJob: ...
 
     async def get_by_id(self, workspace_id: UUID, job_id: UUID) -> DeletionJob | None: ...
+
+
+class ExportJobRepositoryPort(Protocol):
+    """API-plane, connection-bound (FR-AD-5, issue #85) — mirrors
+    ``DeletionJobRepositoryPort``'s sibling role exactly. Status/evidence/
+    ``archive_object_key`` transitions belong to the worker-plane saga
+    (``ports.workspace_export.WorkspaceExportPort``), never written
+    from this side."""
+
+    async def create(self, *, id: UUID, workspace_id: UUID, requested_by: UUID) -> ExportJob: ...
+
+    async def get_by_id(self, workspace_id: UUID, job_id: UUID) -> ExportJob | None: ...
 
 
 class MembershipRepositoryPort(Protocol):

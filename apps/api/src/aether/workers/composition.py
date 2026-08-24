@@ -25,10 +25,14 @@ from aether.adapters.postgres.pool import create_pool
 from aether.adapters.postgres.workspace_deletion_repository import (
     PostgresWorkspaceDeletionRepository,
 )
+from aether.adapters.postgres.workspace_export_repository import (
+    PostgresWorkspaceExportRepository,
+)
 from aether.adapters.redis.ingestion_queue import RedisIngestionQueue
 from aether.app.ingestion.dispatch_outbox_to_queue import DispatchIngestionOutbox
 from aether.app.ingestion.process_document import DocumentProcessor
 from aether.app.notifications.dispatch_email_outbox import DispatchEmailOutbox
+from aether.app.workspaces.build_export import DispatchWorkspaceExport
 from aether.app.workspaces.purge_workspace import DispatchWorkspaceDeletion
 from aether.config import Settings
 from aether.ports.email import EmailPort
@@ -40,6 +44,7 @@ from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.security import ClockPort, IdPort
 from aether.ports.storage import ObjectStoragePort
 from aether.ports.workspace_deletion import WorkspaceDeletionPort
+from aether.ports.workspace_export import WorkspaceExportPort
 
 
 @dataclass
@@ -56,9 +61,11 @@ class WorkerContainer:
     embedder: EmbeddingProviderPort
     ids: IdPort
     workspace_deletion_repository: WorkspaceDeletionPort
+    workspace_export_repository: WorkspaceExportPort
     dispatch_email_outbox: DispatchEmailOutbox
     dispatch_ingestion_outbox: DispatchIngestionOutbox
     dispatch_workspace_deletion: DispatchWorkspaceDeletion
+    dispatch_workspace_export: DispatchWorkspaceExport
     process_document: DocumentProcessor
     """The real ingestion-pipeline handler (issue #46), passed to
     app.ingestion.consume_queue.run_ingestion_consumer by workers/main.py
@@ -115,6 +122,7 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
     embedder = _build_embedder(settings)
     ids = Uuid7Generator()
     workspace_deletion_repository = PostgresWorkspaceDeletionRepository(db_pool)
+    workspace_export_repository = PostgresWorkspaceExportRepository(db_pool)
 
     return WorkerContainer(
         db_pool=db_pool,
@@ -129,6 +137,7 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
         embedder=embedder,
         ids=ids,
         workspace_deletion_repository=workspace_deletion_repository,
+        workspace_export_repository=workspace_export_repository,
         dispatch_email_outbox=DispatchEmailOutbox(outbox=outbox, email=email, clock=clock),
         dispatch_ingestion_outbox=DispatchIngestionOutbox(
             outbox=outbox, queue=ingestion_queue, clock=clock
@@ -136,6 +145,13 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
         dispatch_workspace_deletion=DispatchWorkspaceDeletion(
             outbox=outbox,
             repository=workspace_deletion_repository,
+            object_storage=object_storage,
+            clock=clock,
+            ids=ids,
+        ),
+        dispatch_workspace_export=DispatchWorkspaceExport(
+            outbox=outbox,
+            repository=workspace_export_repository,
             object_storage=object_storage,
             clock=clock,
             ids=ids,
