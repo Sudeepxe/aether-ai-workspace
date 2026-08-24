@@ -57,13 +57,13 @@ test("register, log in, send a message, and see the streamed refusal settle", as
 
   // Issue #83's literal acceptance criterion: "real browser verification
   // of the full round trip" for message-level feedback (FR-CH-6) — a
-  // real POST .../feedback and a real reload proving the selection was
-  // persisted server-side (GET .../messages threads it back), not just
-  // held in client state. Reuses this test's already-authenticated
+  // real POST .../feedback, then proof the selection is persisted
+  // server-side (GET .../messages threads it back) rather than held
+  // only in client state. Reuses this test's already-authenticated
   // session rather than a separate register+login e2e spec, since the
   // real AUTH endpoint is rate-limited (10 req/60s per IP, §7.5) and a
-  // third register+login flow in the same CI job tips the whole e2e
-  // suite over that budget (see issue #83's PR history).
+  // third register+login flow in the same CI job risks tipping the
+  // whole e2e suite over that budget (see issue #83's PR history).
   const goodButton = page.getByRole("button", { name: "Good response" });
   await expect(goodButton).toBeVisible();
   await expect(goodButton).toHaveAttribute("aria-pressed", "false");
@@ -71,18 +71,25 @@ test("register, log in, send a message, and see the streamed refusal settle", as
   await goodButton.click();
   await expect(goodButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 });
 
-  // Generous timeouts below (not this file's usual 10s): this assertion
-  // runs concurrently with grounded-chat.spec.ts's real upload/scan/
-  // ingestion pipeline under Playwright's default multi-worker
-  // parallelism, and CI runners are far more resource-constrained than
-  // a dev machine — a real, observed CI flake at 10s (the round trip
-  // itself is already proven complete by the aria-pressed assertion
-  // above, which only passes once the server write has landed).
-  await page.reload();
-  await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 20_000 });
+  // Deliberately a client-side nav away-and-back, not page.reload(): a
+  // real full reload wipes the in-memory access token by design
+  // (lib/authRefresh.ts) and re-derives it via POST /v1/auth/refresh —
+  // itself an AUTH-class, rate-limited endpoint, which turned this
+  // assertion into a second source of AUTH-bucket pressure and caused a
+  // real, observed CI flake (a 429 there silently logs the session out,
+  // no amount of extra timeout fixes that). Navigating to Documents and
+  // back stays within the same authenticated session (React Router
+  // client-side routing, zero auth calls) while still unmounting and
+  // remounting the messages list, which TanStack Query's default
+  // staleTime=0 refetches fresh from the server on remount — the same
+  // proof of server-side persistence without the extra AUTH load.
+  await page.getByRole("link", { name: "Documents" }).click();
+  await expect(page).toHaveURL(/\/documents$/);
+  await page.getByRole("link", { name: "Back to chat" }).click();
+  await expect(page).toHaveURL(/\/chat$/);
   await expect(page.getByRole("button", { name: "Good response" })).toHaveAttribute(
     "aria-pressed",
     "true",
-    { timeout: 20_000 },
+    { timeout: 10_000 },
   );
 });
