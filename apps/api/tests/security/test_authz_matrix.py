@@ -65,6 +65,11 @@ _EXPECTED_ROUTE_AUTH: dict[tuple[str, str], AuthRequirement] = {
         "/v1/workspaces/{workspace_id}/deletion-jobs/{job_id}",
         "GET",
     ): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}:export", "POST"): AuthRequirement.WORKSPACE_MEMBER,
+    (
+        "/v1/workspaces/{workspace_id}/export-jobs/{job_id}",
+        "GET",
+    ): AuthRequirement.WORKSPACE_MEMBER,
     ("/v1/workspaces/{workspace_id}/members", "GET"): AuthRequirement.WORKSPACE_MEMBER,
     ("/v1/workspaces/{workspace_id}/members/{user_id}", "PATCH"): AuthRequirement.WORKSPACE_MEMBER,
     ("/v1/workspaces/{workspace_id}/members/{user_id}", "DELETE"): AuthRequirement.WORKSPACE_MEMBER,

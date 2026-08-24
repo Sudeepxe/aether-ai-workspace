@@ -36,6 +36,7 @@ from aether.adapters.postgres.chunk_search import PooledChunkSearch
 from aether.adapters.postgres.citation_repository import PostgresCitationRepository
 from aether.adapters.postgres.deletion_job_repository import PostgresDeletionJobRepository
 from aether.adapters.postgres.document_repository import PostgresDocumentRepository
+from aether.adapters.postgres.export_job_repository import PostgresExportJobRepository
 from aether.adapters.postgres.feedback_repository import PostgresFeedbackRepository
 from aether.adapters.postgres.invitation_repository import PostgresInvitationRepository
 from aether.adapters.postgres.membership_repository import PostgresMembershipRepository
@@ -97,8 +98,10 @@ from aether.app.threads.update_thread import UpdateThread
 from aether.app.workspaces.create_workspace import CreateWorkspace
 from aether.app.workspaces.delete_workspace import DeleteWorkspace
 from aether.app.workspaces.get_deletion_job import GetDeletionJob
+from aether.app.workspaces.get_export_job import GetExportJob
 from aether.app.workspaces.get_workspace import GetWorkspace
 from aether.app.workspaces.manage_members import ListMembers, RemoveMember, UpdateMemberRole
+from aether.app.workspaces.request_export import RequestWorkspaceExport
 from aether.app.workspaces.update_workspace import UpdateWorkspace
 from aether.config import Settings
 from aether.ports.audit import AuditLogPort
@@ -114,6 +117,7 @@ from aether.ports.repositories import (
     CitationRepositoryPort,
     DeletionJobRepositoryPort,
     DocumentRepositoryPort,
+    ExportJobRepositoryPort,
     FeedbackRepositoryPort,
     InvitationRepositoryPort,
     Membership,
@@ -219,6 +223,7 @@ class WorkspaceScope:
 
     workspaces: WorkspaceRepositoryPort
     deletion_jobs: DeletionJobRepositoryPort
+    export_jobs: ExportJobRepositoryPort
     memberships: MembershipRepositoryPort
     invitations: InvitationRepositoryPort
     threads: ThreadRepositoryPort
@@ -234,6 +239,8 @@ class WorkspaceScope:
     update_workspace: UpdateWorkspace
     delete_workspace: DeleteWorkspace
     get_deletion_job: GetDeletionJob
+    request_export: RequestWorkspaceExport
+    get_export_job: GetExportJob
     list_members: ListMembers
     update_member_role: UpdateMemberRole
     remove_member: RemoveMember
@@ -265,6 +272,7 @@ def build_workspace_scope(
 ) -> WorkspaceScope:
     workspaces = PostgresWorkspaceRepository(conn)
     deletion_jobs = PostgresDeletionJobRepository(conn)
+    export_jobs = PostgresExportJobRepository(conn)
     memberships = PostgresMembershipRepository(conn)
     invitations = PostgresInvitationRepository(conn)
     threads = PostgresThreadRepository(conn)
@@ -280,6 +288,7 @@ def build_workspace_scope(
         caller_membership=caller_membership,
         workspaces=workspaces,
         deletion_jobs=deletion_jobs,
+        export_jobs=export_jobs,
         memberships=memberships,
         invitations=invitations,
         threads=threads,
@@ -301,6 +310,10 @@ def build_workspace_scope(
             ids=ids,
         ),
         get_deletion_job=GetDeletionJob(deletion_jobs=deletion_jobs),
+        request_export=RequestWorkspaceExport(
+            export_jobs=export_jobs, outbox=outbox, audit_log=audit_log, ids=ids
+        ),
+        get_export_job=GetExportJob(export_jobs=export_jobs, object_storage=object_storage),
         list_members=ListMembers(memberships=memberships),
         update_member_role=UpdateMemberRole(memberships=memberships, audit_log=audit_log, ids=ids),
         remove_member=RemoveMember(memberships=memberships, audit_log=audit_log, ids=ids),

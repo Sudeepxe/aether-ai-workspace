@@ -75,6 +75,13 @@ async def _run_async() -> None:
                     dispatched=deletion_result.dispatched,
                     failed=deletion_result.failed,
                 )
+            export_result = await container.dispatch_workspace_export.execute()
+            if export_result.dispatched or export_result.failed:
+                log.info(
+                    "workspace_export_dispatch_cycle",
+                    dispatched=export_result.dispatched,
+                    failed=export_result.failed,
+                )
             try:
                 await asyncio.wait_for(stop.wait(), timeout=_POLL_INTERVAL_SECONDS)
             except TimeoutError:

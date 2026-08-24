@@ -18,6 +18,23 @@ export interface Thread {
 export type MessageRole = "user" | "assistant" | "system";
 export type MessageStatus = "complete" | "partial" | "cancelled";
 
+// Tenant data export (issue #85, FR-AD-5) — mirrors http/schemas/workspaces.py's
+// ExportJobResponse.
+export type ExportJobStatus = "queued" | "running" | "complete" | "failed";
+
+export interface ExportJob {
+  id: string;
+  workspace_id: string;
+  requested_by: string;
+  status: ExportJobStatus;
+  evidence: Record<string, unknown>;
+  failure_reason: string | null;
+  download_url: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
 // A grounded reply's provenance snapshot (issue #59, ADR-8.6) — captured
 // at write time, so it survives intact even after its source chunk is
 // later deleted (chunk_id becomes null: the UI's "source removed" state,

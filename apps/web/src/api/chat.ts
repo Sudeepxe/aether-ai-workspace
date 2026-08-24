@@ -1,5 +1,12 @@
 import { apiFetch, apiFetchRaw } from "../lib/apiClient";
-import type { Feedback, FeedbackRating, MessageListResponse, Thread, Workspace } from "./types";
+import type {
+  ExportJob,
+  Feedback,
+  FeedbackRating,
+  MessageListResponse,
+  Thread,
+  Workspace,
+} from "./types";
 
 export function createWorkspace(name: string): Promise<Workspace> {
   return apiFetch<Workspace>("/v1/workspaces", { method: "POST", body: { name } });
@@ -39,6 +46,14 @@ export function cancelGeneration(workspaceId: string, generationId: string): Pro
   return apiFetch<void>(`/v1/workspaces/${workspaceId}/generations/${generationId}`, {
     method: "DELETE",
   });
+}
+
+export function requestWorkspaceExport(workspaceId: string): Promise<ExportJob> {
+  return apiFetch<ExportJob>(`/v1/workspaces/${workspaceId}:export`, { method: "POST" });
+}
+
+export function getExportJob(workspaceId: string, jobId: string): Promise<ExportJob> {
+  return apiFetch<ExportJob>(`/v1/workspaces/${workspaceId}/export-jobs/${jobId}`);
 }
 
 export function submitFeedback(

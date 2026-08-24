@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 
 import { Composer } from "../components/Composer";
+import { ExportDataButton } from "../components/ExportDataButton";
 import { MessageList } from "../components/MessageList";
 import { UsageIndicator } from "../components/UsageIndicator";
 import { useLogout } from "../hooks/useAuth";
@@ -61,6 +62,7 @@ function ChatThread({
           <Link to="/documents" className="hover:text-neutral-900">
             Documents
           </Link>
+          <ExportDataButton workspaceId={workspaceId} />
           <UsageIndicator workspaceId={workspaceId} />
           <span>{userLabel}</span>
           <button type="button" onClick={onLogout} className="hover:text-neutral-900">

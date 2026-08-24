@@ -18,12 +18,14 @@ from fastapi import APIRouter, Depends, Header, Response, status
 from aether.app.workspaces.create_workspace import CreateWorkspace, CreateWorkspaceCommand
 from aether.app.workspaces.delete_workspace import DeleteWorkspaceCommand
 from aether.app.workspaces.get_deletion_job import GetDeletionJobCommand
+from aether.app.workspaces.get_export_job import ExportJobView, GetExportJobCommand
 from aether.app.workspaces.get_workspace import GetWorkspaceCommand
 from aether.app.workspaces.manage_members import (
     ListMembersCommand,
     RemoveMemberCommand,
     UpdateMemberRoleCommand,
 )
+from aether.app.workspaces.request_export import RequestWorkspaceExportCommand
 from aether.app.workspaces.update_workspace import UpdateWorkspaceCommand
 from aether.domain.entities import DeletionJob, Membership, Workspace
 from aether.domain.errors import WorkspaceConcurrencyConflictError
@@ -40,6 +42,7 @@ from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
 from aether.http.schemas.workspaces import (
     CreateWorkspaceRequest,
     DeletionJobResponse,
+    ExportJobResponse,
     MembershipResponse,
     UpdateMemberRoleRequest,
     UpdateWorkspaceRequest,
@@ -73,6 +76,22 @@ def _to_deletion_job_response(job: DeletionJob) -> DeletionJobResponse:
         status=job.status,
         evidence=job.evidence,
         failure_reason=job.failure_reason,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        completed_at=job.completed_at,
+    )
+
+
+def _to_export_job_response(view: ExportJobView) -> ExportJobResponse:
+    job = view.job
+    return ExportJobResponse(
+        id=job.id,
+        workspace_id=job.workspace_id,
+        requested_by=job.requested_by,
+        status=job.status,
+        evidence=job.evidence,
+        failure_reason=job.failure_reason,
+        download_url=view.download_url,
         created_at=job.created_at,
         updated_at=job.updated_at,
         completed_at=job.completed_at,
@@ -198,6 +217,48 @@ async def get_deletion_job(
         GetDeletionJobCommand(workspace_id=workspace_id, job_id=job_id)
     )
     return _to_deletion_job_response(job)
+
+
+@router.post(
+    "/workspaces/{workspace_id}:export",
+    response_model=ExportJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
+)
+async def export_workspace(
+    workspace_id: UUID,
+    response: Response,
+    scope: WorkspaceScope = Depends(get_workspace_scope),
+) -> ExportJobResponse:
+    # §7.3's RBAC matrix gates "Workspace delete/export/transfer" as a
+    # single Owner-only row — the same capability DELETE uses, not a
+    # looser admin tier (some issue text elsewhere calls this "Admin-
+    # only" loosely; the blueprint's matrix is the authoritative source
+    # policy.py is transcribed from).
+    require_capability(scope.caller_membership.role, MANAGE_WORKSPACE)
+    job = await scope.request_export.execute(
+        RequestWorkspaceExportCommand(
+            workspace_id=workspace_id, actor_user_id=scope.caller_membership.user_id
+        )
+    )
+    response.headers["Location"] = f"/v1/workspaces/{workspace_id}/export-jobs/{job.id}"
+    return _to_export_job_response(ExportJobView(job=job, download_url=None))
+
+
+@router.get(
+    "/workspaces/{workspace_id}/export-jobs/{job_id}",
+    response_model=ExportJobResponse,
+    openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
+)
+async def get_export_job(
+    workspace_id: UUID, job_id: UUID, scope: WorkspaceScope = Depends(get_workspace_scope)
+) -> ExportJobResponse:
+    view = await scope.get_export_job.execute(
+        GetExportJobCommand(workspace_id=workspace_id, job_id=job_id)
+    )
+    return _to_export_job_response(view)
 
 
 @router.get(

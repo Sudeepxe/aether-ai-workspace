@@ -9,6 +9,8 @@ from aether.domain.entities import (
     AuditEvent,
     DeletionJob,
     DeletionJobStatus,
+    ExportJob,
+    ExportJobStatus,
     Invitation,
     Membership,
     MembershipRole,
@@ -164,6 +166,37 @@ class FakeDeletionJobRepository:
     async def get_by_id(self, workspace_id: UUID, job_id: UUID) -> DeletionJob | None:
         job = self._rows.get(job_id)
         return job if job is not None and job.workspace_id == workspace_id else None
+
+
+class FakeExportJobRepository:
+    def __init__(self) -> None:
+        self._rows: dict[UUID, ExportJob] = {}
+
+    async def create(self, *, id: UUID, workspace_id: UUID, requested_by: UUID) -> ExportJob:
+        now = datetime.now().astimezone()
+        job = ExportJob(
+            id=id,
+            workspace_id=workspace_id,
+            requested_by=requested_by,
+            status=ExportJobStatus.QUEUED,
+            archive_object_key=None,
+            evidence={},
+            failure_reason=None,
+            created_at=now,
+            updated_at=now,
+            completed_at=None,
+        )
+        self._rows[id] = job
+        return job
+
+    async def get_by_id(self, workspace_id: UUID, job_id: UUID) -> ExportJob | None:
+        job = self._rows.get(job_id)
+        return job if job is not None and job.workspace_id == workspace_id else None
+
+    def seed(self, job: ExportJob) -> None:
+        """Test-only: directly install a job row, e.g. to simulate one
+        the worker-plane saga already completed."""
+        self._rows[job.id] = job
 
 
 class FakeMembershipRepository:
