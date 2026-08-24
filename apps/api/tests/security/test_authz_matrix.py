@@ -90,6 +90,10 @@ _EXPECTED_ROUTE_AUTH: dict[tuple[str, str], AuthRequirement] = {
         "POST",
     ): AuthRequirement.WORKSPACE_MEMBER,
     (
+        "/v1/workspaces/{workspace_id}/threads/{thread_id}/messages/{message_id}/feedback",
+        "POST",
+    ): AuthRequirement.WORKSPACE_MEMBER,
+    (
         "/v1/workspaces/{workspace_id}/generations/{generation_id}",
         "DELETE",
     ): AuthRequirement.WORKSPACE_MEMBER,

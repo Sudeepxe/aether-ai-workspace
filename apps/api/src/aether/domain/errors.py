@@ -113,3 +113,13 @@ class DocumentUploadIncompleteError(DomainError):
     """documents:confirm was called but the object storage key it names
     doesn't actually exist yet — the client claims an upload finished
     that the storage backend has no record of."""
+
+
+class MessageNotFoundError(DomainError):
+    """Referenced message id does not exist in this workspace/thread."""
+
+
+class FeedbackNotEligibleError(DomainError):
+    """Feedback was submitted against a non-assistant message — only an
+    assistant's own turns are feedback-eligible (FR-CH-6): feedback on a
+    user's own message is meaningless."""

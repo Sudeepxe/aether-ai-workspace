@@ -31,6 +31,16 @@ export interface Citation {
   page_end: number | null;
 }
 
+// Message-level feedback (FR-CH-6, issue #83) — a caller's own 👍/👎 on
+// an assistant message, threaded back onto GET .../messages the same
+// way citations are (issue #61's precedent).
+export type FeedbackRating = "up" | "down";
+
+export interface Feedback {
+  rating: FeedbackRating;
+  reason: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   workspace_id: string;
@@ -43,6 +53,7 @@ export interface ChatMessage {
   model: string | null;
   grounded: boolean;
   citations: Citation[];
+  feedback: Feedback | null;
   created_at: string;
 }
 

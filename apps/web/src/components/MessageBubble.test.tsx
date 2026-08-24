@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Citation } from "../api/types";
 import { MessageBubble } from "./MessageBubble";
@@ -93,5 +94,58 @@ describe("MessageBubble", () => {
 
     expect(screen.queryByText("Not found in knowledge base")).not.toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Sources" })).not.toBeInTheDocument();
+  });
+
+  it("shows thumbs up/down for an assistant message when onFeedback is provided", () => {
+    render(
+      <MessageBubble authorRole="assistant" content="Acme costs $10/mo." onFeedback={() => {}} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Good response" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bad response" })).toBeInTheDocument();
+  });
+
+  it("omits feedback controls when onFeedback is not provided (e.g. a still-streaming turn)", () => {
+    render(<MessageBubble authorRole="assistant" content="Acme costs $10/mo." />);
+
+    expect(screen.queryByRole("button", { name: "Good response" })).not.toBeInTheDocument();
+  });
+
+  it("never shows feedback controls for a user message, even if onFeedback were passed", () => {
+    render(<MessageBubble authorRole="user" content="hello" onFeedback={() => {}} />);
+
+    expect(screen.queryByRole("button", { name: "Good response" })).not.toBeInTheDocument();
+  });
+
+  it("calls onFeedback with the clicked rating", async () => {
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    render(
+      <MessageBubble authorRole="assistant" content="Acme costs $10/mo." onFeedback={onFeedback} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Bad response" }));
+
+    expect(onFeedback).toHaveBeenCalledWith("down");
+  });
+
+  it("reflects the caller's existing feedback selection as pressed", () => {
+    render(
+      <MessageBubble
+        authorRole="assistant"
+        content="Acme costs $10/mo."
+        feedback={{ rating: "up", reason: null }}
+        onFeedback={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Good response" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Bad response" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 });

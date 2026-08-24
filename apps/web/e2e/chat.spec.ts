@@ -54,4 +54,35 @@ test("register, log in, send a message, and see the streamed refusal settle", as
   // while streaming) and the reply has no stray cursor indicator.
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('[aria-hidden="true"]', { hasText: "▍" })).toHaveCount(0);
+
+  // Issue #83's literal acceptance criterion: "real browser verification
+  // of the full round trip" for message-level feedback (FR-CH-6) — a
+  // real POST .../feedback and a real reload proving the selection was
+  // persisted server-side (GET .../messages threads it back), not just
+  // held in client state. Reuses this test's already-authenticated
+  // session rather than a separate register+login e2e spec, since the
+  // real AUTH endpoint is rate-limited (10 req/60s per IP, §7.5) and a
+  // third register+login flow in the same CI job tips the whole e2e
+  // suite over that budget (see issue #83's PR history).
+  const goodButton = page.getByRole("button", { name: "Good response" });
+  await expect(goodButton).toBeVisible();
+  await expect(goodButton).toHaveAttribute("aria-pressed", "false");
+
+  await goodButton.click();
+  await expect(goodButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 });
+
+  // Generous timeouts below (not this file's usual 10s): this assertion
+  // runs concurrently with grounded-chat.spec.ts's real upload/scan/
+  // ingestion pipeline under Playwright's default multi-worker
+  // parallelism, and CI runners are far more resource-constrained than
+  // a dev machine — a real, observed CI flake at 10s (the round trip
+  // itself is already proven complete by the aria-pressed assertion
+  // above, which only passes once the server write has landed).
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Good response" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+    { timeout: 20_000 },
+  );
 });

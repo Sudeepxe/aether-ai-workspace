@@ -22,6 +22,8 @@ from aether.domain.entities import (
     CitationDraft,
     Document,
     DocumentStatus,
+    Feedback,
+    FeedbackRating,
     Invitation,
     Membership,
     MembershipRole,
@@ -45,6 +47,9 @@ __all__ = [
     "DocumentRepositoryPort",
     "DocumentStatus",
     "EmailAlreadyRegisteredError",
+    "Feedback",
+    "FeedbackRating",
+    "FeedbackRepositoryPort",
     "Invitation",
     "InvitationRepositoryPort",
     "Membership",
@@ -284,11 +289,50 @@ class MessageRepositoryPort(Protocol):
         client-generated ``message_id`` must not create a second message."""
         ...
 
+    async def get_by_id(self, workspace_id: UUID, message_id: UUID) -> Message | None:
+        """Issue #83's feedback-eligibility lookup: submitting feedback
+        needs the target message's role (only ASSISTANT is eligible)
+        without knowing its thread or seq up front."""
+        ...
+
     async def list_by_thread(
         self, workspace_id: UUID, thread_id: UUID, *, after_seq: int | None, limit: int
     ) -> list[Message]:
         """Cursor pagination on seq DESC (§8.1: seq is itself a natural,
         gapless pagination cursor — ADR-8.2)."""
+        ...
+
+
+class FeedbackRepositoryPort(Protocol):
+    """Connection-bound (same sibling role to a pool-bound port as
+    ``CitationRepositoryPort`` — see its docstring). Unlike citations,
+    feedback *is* mutated after creation: a caller changing their mind
+    upserts via ``UNIQUE(message_id, user_id)``, it never creates a
+    second row (§8.1)."""
+
+    async def upsert(
+        self,
+        *,
+        id: UUID,
+        workspace_id: UUID,
+        message_id: UUID,
+        user_id: UUID,
+        rating: FeedbackRating,
+        reason: str | None,
+    ) -> Feedback:
+        """``id`` is only used on first insert — a conflicting
+        (message_id, user_id) keeps its original id and just updates
+        rating/reason/updated_at, matching ``MemorySummaryStorePort``'s
+        upsert precedent."""
+        ...
+
+    async def list_by_messages_for_user(
+        self, workspace_id: UUID, message_ids: list[UUID], user_id: UUID
+    ) -> list[Feedback]:
+        """Batched sibling of a single-message lookup, matching
+        ``CitationRepositoryPort.list_by_messages``'s no-N+1 shape for
+        GET .../messages — scoped to the *caller's own* feedback only,
+        never another member's."""
         ...
 
 

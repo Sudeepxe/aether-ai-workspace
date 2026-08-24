@@ -112,6 +112,16 @@ class PostgresMessageRepository:
         )
         return _row_to_message(row) if row is not None else None
 
+    async def get_by_id(self, workspace_id: UUID, message_id: UUID) -> Message | None:
+        row = await self._conn.fetchrow(
+            "SELECT id, workspace_id, thread_id, seq, role, content, status, client_message_id, "
+            "model, prompt_tokens, completion_tokens, cost_microcents, grounded, created_at "
+            "FROM messages WHERE workspace_id = $1 AND id = $2",
+            workspace_id,
+            message_id,
+        )
+        return _row_to_message(row) if row is not None else None
+
     async def get_by_seq(self, workspace_id: UUID, thread_id: UUID, seq: int) -> Message | None:
         row = await self._conn.fetchrow(
             "SELECT id, workspace_id, thread_id, seq, role, content, status, client_message_id, "

@@ -1,4 +1,4 @@
-import { useMessages } from "../hooks/useMessages";
+import { useMessages, useSubmitFeedback } from "../hooks/useMessages";
 import { useChatStreamStore } from "../state/chatStreamStore";
 import { MessageBubble } from "./MessageBubble";
 
@@ -18,6 +18,7 @@ export function MessageList({
 }): JSX.Element {
   const { data, isLoading, isError } = useMessages(workspaceId, threadId);
   const activeStream = useChatStreamStore((s) => s.activeStream);
+  const submitFeedback = useSubmitFeedback(workspaceId, threadId);
 
   if (isLoading) {
     return <p className="text-sm text-neutral-500">Loading…</p>;
@@ -47,6 +48,12 @@ export function MessageList({
           content={message.content}
           grounded={message.grounded}
           citations={message.citations}
+          feedback={message.feedback}
+          onFeedback={
+            message.role === "assistant"
+              ? (rating) => submitFeedback.mutate({ messageId: message.id, rating })
+              : undefined
+          }
         />
       ))}
       {activeStream !== null && activeStream.threadId === threadId && (

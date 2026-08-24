@@ -15,6 +15,7 @@ from aether.app.threads.delete_thread import DeleteThreadCommand
 from aether.app.threads.get_thread import GetThreadCommand
 from aether.app.threads.list_messages import ListMessagesCommand, MessageWithCitations
 from aether.app.threads.list_threads import ListThreadsCommand
+from aether.app.threads.submit_feedback import SubmitFeedbackCommand
 from aether.app.threads.update_thread import UpdateThreadCommand
 from aether.domain.entities import Thread
 from aether.domain.policy import CREATE_MESSAGES
@@ -33,8 +34,10 @@ from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
 from aether.http.schemas.threads import (
     CitationResponse,
     CreateThreadRequest,
+    FeedbackResponse,
     MessageListResponse,
     MessageResponse,
+    SubmitFeedbackRequest,
     ThreadListResponse,
     ThreadResponse,
     UpdateThreadRequest,
@@ -82,6 +85,11 @@ def _to_message_response(item: MessageWithCitations) -> MessageResponse:
             )
             for c in item.citations
         ],
+        feedback=(
+            FeedbackResponse(rating=item.feedback.rating, reason=item.feedback.reason)
+            if item.feedback is not None
+            else None
+        ),
         created_at=message.created_at,
     )
 
@@ -198,6 +206,7 @@ async def list_messages(
         ListMessagesCommand(
             workspace_id=workspace_id,
             thread_id=thread_id,
+            caller_user_id=scope.caller_membership.user_id,
             after_seq=after_seq,
             limit=page_limit + 1,
         )
@@ -208,3 +217,30 @@ async def list_messages(
     return MessageListResponse(
         items=[_to_message_response(m) for m in page], next_cursor=next_cursor
     )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/threads/{thread_id}/messages/{message_id}/feedback",
+    response_model=FeedbackResponse,
+    openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
+)
+async def submit_feedback(
+    workspace_id: UUID,
+    thread_id: UUID,
+    message_id: UUID,
+    body: SubmitFeedbackRequest,
+    scope: WorkspaceScope = Depends(get_workspace_scope),
+) -> FeedbackResponse:
+    require_capability(scope.caller_membership.role, CREATE_MESSAGES)
+    feedback = await scope.submit_feedback.execute(
+        SubmitFeedbackCommand(
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            message_id=message_id,
+            user_id=scope.caller_membership.user_id,
+            rating=body.rating,
+            reason=body.reason,
+        )
+    )
+    return FeedbackResponse(rating=feedback.rating, reason=feedback.reason)
