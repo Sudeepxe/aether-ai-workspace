@@ -19,6 +19,9 @@ from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
+from aether.adapters.postgres.deletion_verification_repository import (
+    PostgresDeletionVerificationRepository,
+)
 from aether.adapters.postgres.ingestion_repository import PostgresIngestionRepository
 from aether.adapters.postgres.outbox_repository import PostgresOutboxRepository
 from aether.adapters.postgres.pool import create_pool
@@ -34,7 +37,9 @@ from aether.app.ingestion.process_document import DocumentProcessor
 from aether.app.notifications.dispatch_email_outbox import DispatchEmailOutbox
 from aether.app.workspaces.build_export import DispatchWorkspaceExport
 from aether.app.workspaces.purge_workspace import DispatchWorkspaceDeletion
+from aether.app.workspaces.verify_deletions import VerifyWorkspaceDeletions
 from aether.config import Settings
+from aether.ports.deletion_verification import DeletionVerificationPort
 from aether.ports.email import EmailPort
 from aether.ports.embedding import EmbeddingProviderPort
 from aether.ports.ingestion_queue import IngestionQueuePort
@@ -45,6 +50,14 @@ from aether.ports.security import ClockPort, IdPort
 from aether.ports.storage import ObjectStoragePort
 from aether.ports.workspace_deletion import WorkspaceDeletionPort
 from aether.ports.workspace_export import WorkspaceExportPort
+
+# A real, if deliberately small, "not immediately inline" decoupling
+# gate (issue #86) — this system has no read replicas to actually wait
+# out lag on, so this is a token wait rather than a load-bearing one;
+# the real safety property is that verification is a *separate* call
+# from the deletion dispatcher, not that it's delayed by any particular
+# amount.
+_MIN_VERIFICATION_AGE_SECONDS = 60
 
 
 @dataclass
@@ -62,10 +75,12 @@ class WorkerContainer:
     ids: IdPort
     workspace_deletion_repository: WorkspaceDeletionPort
     workspace_export_repository: WorkspaceExportPort
+    deletion_verification_repository: DeletionVerificationPort
     dispatch_email_outbox: DispatchEmailOutbox
     dispatch_ingestion_outbox: DispatchIngestionOutbox
     dispatch_workspace_deletion: DispatchWorkspaceDeletion
     dispatch_workspace_export: DispatchWorkspaceExport
+    verify_workspace_deletions: VerifyWorkspaceDeletions
     process_document: DocumentProcessor
     """The real ingestion-pipeline handler (issue #46), passed to
     app.ingestion.consume_queue.run_ingestion_consumer by workers/main.py
@@ -123,6 +138,7 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
     ids = Uuid7Generator()
     workspace_deletion_repository = PostgresWorkspaceDeletionRepository(db_pool)
     workspace_export_repository = PostgresWorkspaceExportRepository(db_pool)
+    deletion_verification_repository = PostgresDeletionVerificationRepository(db_pool)
 
     return WorkerContainer(
         db_pool=db_pool,
@@ -138,6 +154,7 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
         ids=ids,
         workspace_deletion_repository=workspace_deletion_repository,
         workspace_export_repository=workspace_export_repository,
+        deletion_verification_repository=deletion_verification_repository,
         dispatch_email_outbox=DispatchEmailOutbox(outbox=outbox, email=email, clock=clock),
         dispatch_ingestion_outbox=DispatchIngestionOutbox(
             outbox=outbox, queue=ingestion_queue, clock=clock
@@ -155,6 +172,13 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
             object_storage=object_storage,
             clock=clock,
             ids=ids,
+        ),
+        verify_workspace_deletions=VerifyWorkspaceDeletions(
+            repository=deletion_verification_repository,
+            object_storage=object_storage,
+            clock=clock,
+            ids=ids,
+            min_age_seconds=_MIN_VERIFICATION_AGE_SECONDS,
         ),
         process_document=DocumentProcessor(
             object_storage=object_storage,

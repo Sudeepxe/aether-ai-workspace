@@ -102,6 +102,13 @@ class MinioObjectStorage:
 
         await asyncio.to_thread(_put)
 
+    async def list_prefix(self, *, prefix: str) -> list[str]:
+        def _list() -> list[str]:
+            objects = self._client.list_objects(self._bucket, prefix=prefix, recursive=True)
+            return [obj.object_name for obj in objects if obj.object_name is not None]
+
+        return await asyncio.to_thread(_list)
+
     async def ensure_bucket(self) -> None:
         """Idempotent bucket provisioning, called once at process
         startup — dev MinIO starts with no buckets; a real cloud profile

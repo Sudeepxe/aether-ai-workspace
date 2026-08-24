@@ -116,3 +116,8 @@ class FakeDocumentObjectStorage:
         self, *, key: str, content: bytes, content_type: str
     ) -> None:  # pragma: no cover - unused by these use cases
         raise NotImplementedError
+
+    async def list_prefix(
+        self, *, prefix: str
+    ) -> list[str]:  # pragma: no cover - unused by these use cases
+        raise NotImplementedError

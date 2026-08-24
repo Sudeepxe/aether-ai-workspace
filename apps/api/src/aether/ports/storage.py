@@ -65,3 +65,13 @@ class ObjectStoragePort(Protocol):
         itself produces a new object (an assembled archive) rather than
         just reading or removing one that a client uploaded."""
         ...
+
+    async def list_prefix(self, *, prefix: str) -> list[str]:
+        """Every key currently under ``prefix``, worker-only. The
+        deletion-verification saga's (issue #86) one genuinely
+        independent check: unlike a DB residue sweep, which can only
+        ever prove "no row references this key", listing storage
+        directly proves the *bytes themselves* are gone — the real
+        counterpart to a bug where the purge step's own key list was
+        wrong or incomplete."""
+        ...

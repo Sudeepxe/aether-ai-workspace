@@ -7,9 +7,13 @@ ingestion-queue dispatcher (relaying document.uploaded rows into the
 per-tenant fair-queued Redis Streams consumer group) and, once issue #46
 built a real handler, the queue's own consumer loop — fetch -> malware
 scan -> parse -> chunk, run as a background task alongside the polling
-loop. Sprint 8 adds the workspace-deletion saga dispatcher (DF-3, issue
-#84): outbox-driven, same poll-loop shape as the other two. Graceful
-shutdown (§3.2.8: "finish or re-queue on SIGTERM, <=30s") shares the
+loop. Sprint 8 adds the workspace-deletion (DF-3, #84) and workspace-
+export (FR-AD-5, #85) saga dispatchers — outbox-driven, same poll-loop
+shape as the other two — plus the deletion-verification sweep (NFR-PR-1,
+#86), which is the one dispatcher here that *isn't* outbox-driven: it
+polls completed deletion_jobs directly, since there's no natural event
+to enqueue for "verify sometime after the fact". Graceful shutdown
+(§3.2.8: "finish or re-queue on SIGTERM, <=30s") shares the
 same stop event with the poll loop: the consumer only checks it between
 claims, so a message already in flight always finishes before this
 process actually exits.
@@ -81,6 +85,13 @@ async def _run_async() -> None:
                     "workspace_export_dispatch_cycle",
                     dispatched=export_result.dispatched,
                     failed=export_result.failed,
+                )
+            verification_result = await container.verify_workspace_deletions.execute()
+            if verification_result.passed or verification_result.failed:
+                log.info(
+                    "deletion_verification_cycle",
+                    passed=verification_result.passed,
+                    failed=verification_result.failed,
                 )
             try:
                 await asyncio.wait_for(stop.wait(), timeout=_POLL_INTERVAL_SECONDS)
