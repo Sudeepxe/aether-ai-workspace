@@ -123,3 +123,11 @@ class FeedbackNotEligibleError(DomainError):
     """Feedback was submitted against a non-assistant message — only an
     assistant's own turns are feedback-eligible (FR-CH-6): feedback on a
     user's own message is meaningless."""
+
+
+class DeletionJobNotFoundError(DomainError):
+    """Referenced deletion job id does not exist in this workspace — or
+    the workspace itself is already gone (its hard-delete cascades away
+    the caller's own membership, so this is also what a poll racing the
+    saga's completion looks like from the outside; see the deletion_jobs
+    migration's docstring)."""

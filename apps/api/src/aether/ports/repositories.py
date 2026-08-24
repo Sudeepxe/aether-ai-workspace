@@ -20,6 +20,8 @@ from aether.domain.entities import (
     AuditEvent,
     Citation,
     CitationDraft,
+    DeletionJob,
+    DeletionJobStatus,
     Document,
     DocumentStatus,
     Feedback,
@@ -43,6 +45,9 @@ __all__ = [
     "Citation",
     "CitationDraft",
     "CitationRepositoryPort",
+    "DeletionJob",
+    "DeletionJobRepositoryPort",
+    "DeletionJobStatus",
     "Document",
     "DocumentRepositoryPort",
     "DocumentStatus",
@@ -135,6 +140,19 @@ class WorkspaceRepositoryPort(Protocol):
         ...
 
     async def soft_delete(self, workspace_id: UUID, *, deleted_at: datetime) -> None: ...
+
+
+class DeletionJobRepositoryPort(Protocol):
+    """API-plane, connection-bound (DF-3, issue #84) — DeleteWorkspace
+    creates the row in the same request transaction as the soft-delete
+    marker and outbox enqueue; GetDeletionJob reads it back for status
+    polling. Status/evidence transitions belong to the worker-plane
+    saga (``ports.workspace_deletion.WorkspaceDeletionPort``), never
+    written from this side."""
+
+    async def create(self, *, id: UUID, workspace_id: UUID, requested_by: UUID) -> DeletionJob: ...
+
+    async def get_by_id(self, workspace_id: UUID, job_id: UUID) -> DeletionJob | None: ...
 
 
 class MembershipRepositoryPort(Protocol):

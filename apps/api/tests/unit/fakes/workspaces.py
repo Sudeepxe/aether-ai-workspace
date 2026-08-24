@@ -5,7 +5,15 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from aether.domain.entities import AuditEvent, Invitation, Membership, MembershipRole, Workspace
+from aether.domain.entities import (
+    AuditEvent,
+    DeletionJob,
+    DeletionJobStatus,
+    Invitation,
+    Membership,
+    MembershipRole,
+    Workspace,
+)
 from aether.ports.metering import Budget
 
 
@@ -131,6 +139,31 @@ class FakeWorkspaceRepository:
                 updated_at=current.updated_at,
                 deleted_at=deleted_at,
             )
+
+
+class FakeDeletionJobRepository:
+    def __init__(self) -> None:
+        self._rows: dict[UUID, DeletionJob] = {}
+
+    async def create(self, *, id: UUID, workspace_id: UUID, requested_by: UUID) -> DeletionJob:
+        now = datetime.now().astimezone()
+        job = DeletionJob(
+            id=id,
+            workspace_id=workspace_id,
+            requested_by=requested_by,
+            status=DeletionJobStatus.QUEUED,
+            evidence={},
+            failure_reason=None,
+            created_at=now,
+            updated_at=now,
+            completed_at=None,
+        )
+        self._rows[id] = job
+        return job
+
+    async def get_by_id(self, workspace_id: UUID, job_id: UUID) -> DeletionJob | None:
+        job = self._rows.get(job_id)
+        return job if job is not None and job.workspace_id == workspace_id else None
 
 
 class FakeMembershipRepository:

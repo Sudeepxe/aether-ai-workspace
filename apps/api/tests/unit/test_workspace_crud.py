@@ -9,12 +9,14 @@ from aether.app.workspaces.create_workspace import CreateWorkspace, CreateWorksp
 from aether.app.workspaces.delete_workspace import DeleteWorkspace, DeleteWorkspaceCommand
 from aether.app.workspaces.get_workspace import GetWorkspace, GetWorkspaceCommand
 from aether.app.workspaces.update_workspace import UpdateWorkspace, UpdateWorkspaceCommand
-from aether.domain.entities import MembershipRole
+from aether.domain.entities import DeletionJobStatus, MembershipRole
 from aether.domain.errors import WorkspaceConcurrencyConflictError, WorkspaceNotFoundError
 from tests.unit.fakes.auth import FakeClock, FakeIdGenerator
+from tests.unit.fakes.outbox import FakeOutboxRepository
 from tests.unit.fakes.workspaces import (
     FakeAuditLog,
     FakeBudgetRepository,
+    FakeDeletionJobRepository,
     FakeMembershipRepository,
     FakeWorkspaceRepository,
 )
@@ -154,6 +156,8 @@ async def test_delete_workspace_makes_it_unreadable() -> None:
     )
     delete_use_case = DeleteWorkspace(
         workspaces=workspaces,
+        deletion_jobs=FakeDeletionJobRepository(),
+        outbox=FakeOutboxRepository(),
         audit_log=FakeAuditLog(),
         clock=FakeClock(start=datetime.now(UTC)),
         ids=FakeIdGenerator(),
@@ -166,3 +170,36 @@ async def test_delete_workspace_makes_it_unreadable() -> None:
         await GetWorkspace(workspaces=workspaces).execute(
             GetWorkspaceCommand(workspace_id=workspace.id)
         )
+
+
+async def test_delete_workspace_creates_a_queued_deletion_job_and_enqueues_the_saga() -> None:
+    workspaces = FakeWorkspaceRepository()
+    workspace = await workspaces.create(
+        id=UUID(int=1), name="Acme", slug="acme", settings={}, model_policy={}
+    )
+    deletion_jobs = FakeDeletionJobRepository()
+    outbox = FakeOutboxRepository()
+    delete_use_case = DeleteWorkspace(
+        workspaces=workspaces,
+        deletion_jobs=deletion_jobs,
+        outbox=outbox,
+        audit_log=FakeAuditLog(),
+        clock=FakeClock(start=datetime.now(UTC)),
+        ids=FakeIdGenerator(),
+    )
+
+    job = await delete_use_case.execute(
+        DeleteWorkspaceCommand(workspace_id=workspace.id, actor_user_id=UUID(int=999))
+    )
+
+    assert job.workspace_id == workspace.id
+    assert job.status == DeletionJobStatus.QUEUED
+    persisted = await deletion_jobs.get_by_id(workspace.id, job.id)
+    assert persisted is not None
+    assert persisted.id == job.id
+    enqueued = await outbox.fetch_pending(
+        event_type="workspace.delete_requested", max_attempts=5, limit=10
+    )
+    assert len(enqueued) == 1
+    assert enqueued[0].tenant_id == workspace.id
+    assert enqueued[0].payload == {"deletion_job_id": str(job.id)}

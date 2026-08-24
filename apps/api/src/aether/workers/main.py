@@ -7,10 +7,12 @@ ingestion-queue dispatcher (relaying document.uploaded rows into the
 per-tenant fair-queued Redis Streams consumer group) and, once issue #46
 built a real handler, the queue's own consumer loop — fetch -> malware
 scan -> parse -> chunk, run as a background task alongside the polling
-loop. Graceful shutdown (§3.2.8: "finish or re-queue on SIGTERM, <=30s")
-shares the same stop event with the poll loop: the consumer only checks
-it between claims, so a message already in flight always finishes
-before this process actually exits.
+loop. Sprint 8 adds the workspace-deletion saga dispatcher (DF-3, issue
+#84): outbox-driven, same poll-loop shape as the other two. Graceful
+shutdown (§3.2.8: "finish or re-queue on SIGTERM, <=30s") shares the
+same stop event with the poll loop: the consumer only checks it between
+claims, so a message already in flight always finishes before this
+process actually exits.
 """
 
 from __future__ import annotations
@@ -65,6 +67,13 @@ async def _run_async() -> None:
                     "ingestion_outbox_dispatch_cycle",
                     dispatched=ingestion_result.dispatched,
                     failed=ingestion_result.failed,
+                )
+            deletion_result = await container.dispatch_workspace_deletion.execute()
+            if deletion_result.dispatched or deletion_result.failed:
+                log.info(
+                    "workspace_deletion_dispatch_cycle",
+                    dispatched=deletion_result.dispatched,
+                    failed=deletion_result.failed,
                 )
             try:
                 await asyncio.wait_for(stop.wait(), timeout=_POLL_INTERVAL_SECONDS)
