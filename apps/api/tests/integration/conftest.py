@@ -109,8 +109,13 @@ async def db_bootstrap_pool(postgres_url: str) -> AsyncIterator[asyncpg.Pool]:
         async with pool.acquire() as conn:
             # TRUNCATE on a partitioned table (audit_events) cascades to
             # all its partitions automatically — no need to list them.
+            # deletion_jobs is listed explicitly (not just "workspaces
+            # CASCADE"): it deliberately has no FK to workspaces (see its
+            # migration's docstring — the job row must outlive the very
+            # cascade it documents), so it's the one tenant-scoped table
+            # a workspace truncate/cascade never reaches on its own.
             await conn.execute(
-                "TRUNCATE memberships, invitations, audit_events, outbox, "
+                "TRUNCATE memberships, invitations, audit_events, outbox, deletion_jobs, "
                 "password_reset_tokens, workspaces, users, refresh_tokens RESTART IDENTITY CASCADE"
             )
             # global_usage_counter has no FK relationship to workspaces

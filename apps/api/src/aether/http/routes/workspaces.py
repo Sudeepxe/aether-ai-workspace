@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Header, Response, status
 
 from aether.app.workspaces.create_workspace import CreateWorkspace, CreateWorkspaceCommand
 from aether.app.workspaces.delete_workspace import DeleteWorkspaceCommand
+from aether.app.workspaces.get_deletion_job import GetDeletionJobCommand
 from aether.app.workspaces.get_workspace import GetWorkspaceCommand
 from aether.app.workspaces.manage_members import (
     ListMembersCommand,
@@ -24,7 +25,7 @@ from aether.app.workspaces.manage_members import (
     UpdateMemberRoleCommand,
 )
 from aether.app.workspaces.update_workspace import UpdateWorkspaceCommand
-from aether.domain.entities import Membership, Workspace
+from aether.domain.entities import DeletionJob, Membership, Workspace
 from aether.domain.errors import WorkspaceConcurrencyConflictError
 from aether.domain.policy import MANAGE_BUDGETS, MANAGE_MEMBERS, MANAGE_WORKSPACE
 from aether.http.authz import AuthRequirement, require_capability, route_auth
@@ -38,6 +39,7 @@ from aether.http.deps import (
 from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
 from aether.http.schemas.workspaces import (
     CreateWorkspaceRequest,
+    DeletionJobResponse,
     MembershipResponse,
     UpdateMemberRoleRequest,
     UpdateWorkspaceRequest,
@@ -60,6 +62,20 @@ def _to_workspace_response(workspace: Workspace) -> WorkspaceResponse:
         model_policy=workspace.model_policy,
         created_at=workspace.created_at,
         updated_at=workspace.updated_at,
+    )
+
+
+def _to_deletion_job_response(job: DeletionJob) -> DeletionJobResponse:
+    return DeletionJobResponse(
+        id=job.id,
+        workspace_id=job.workspace_id,
+        requested_by=job.requested_by,
+        status=job.status,
+        evidence=job.evidence,
+        failure_reason=job.failure_reason,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        completed_at=job.completed_at,
     )
 
 
@@ -149,19 +165,39 @@ async def update_workspace(
 
 @router.delete(
     "/workspaces/{workspace_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=DeletionJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
     dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
 )
 async def delete_workspace(
-    workspace_id: UUID, scope: WorkspaceScope = Depends(get_workspace_scope)
-) -> None:
+    workspace_id: UUID,
+    response: Response,
+    scope: WorkspaceScope = Depends(get_workspace_scope),
+) -> DeletionJobResponse:
     require_capability(scope.caller_membership.role, MANAGE_WORKSPACE)
-    await scope.delete_workspace.execute(
+    job = await scope.delete_workspace.execute(
         DeleteWorkspaceCommand(
             workspace_id=workspace_id, actor_user_id=scope.caller_membership.user_id
         )
     )
+    response.headers["Location"] = f"/v1/workspaces/{workspace_id}/deletion-jobs/{job.id}"
+    return _to_deletion_job_response(job)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/deletion-jobs/{job_id}",
+    response_model=DeletionJobResponse,
+    openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
+    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
+)
+async def get_deletion_job(
+    workspace_id: UUID, job_id: UUID, scope: WorkspaceScope = Depends(get_workspace_scope)
+) -> DeletionJobResponse:
+    job = await scope.get_deletion_job.execute(
+        GetDeletionJobCommand(workspace_id=workspace_id, job_id=job_id)
+    )
+    return _to_deletion_job_response(job)
 
 
 @router.get(

@@ -23,6 +23,7 @@ from aether.domain.errors import (
     AuthenticationFailedError,
     BudgetConcurrencyConflictError,
     BudgetExhaustedError,
+    DeletionJobNotFoundError,
     DocumentNotFoundError,
     DocumentUploadIncompleteError,
     DomainError,
@@ -81,6 +82,7 @@ _ERROR_STATUS: dict[type[DomainError], int] = {
     GenerationNotFoundError: 404,
     DocumentNotFoundError: 404,
     MessageNotFoundError: 404,
+    DeletionJobNotFoundError: 404,
     # The client claims an upload finished; storage disagrees — a
     # precondition failure on the caller's own claimed state, not a
     # server error.

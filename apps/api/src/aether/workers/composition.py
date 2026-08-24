@@ -15,16 +15,21 @@ from aether.adapters.clamav.scanner import ClamAvScanner
 from aether.adapters.clock import SystemClock
 from aether.adapters.email.resend import ResendEmailAdapter
 from aether.adapters.email.smtp import SmtpEmailAdapter
+from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
 from aether.adapters.postgres.ingestion_repository import PostgresIngestionRepository
 from aether.adapters.postgres.outbox_repository import PostgresOutboxRepository
 from aether.adapters.postgres.pool import create_pool
+from aether.adapters.postgres.workspace_deletion_repository import (
+    PostgresWorkspaceDeletionRepository,
+)
 from aether.adapters.redis.ingestion_queue import RedisIngestionQueue
 from aether.app.ingestion.dispatch_outbox_to_queue import DispatchIngestionOutbox
 from aether.app.ingestion.process_document import DocumentProcessor
 from aether.app.notifications.dispatch_email_outbox import DispatchEmailOutbox
+from aether.app.workspaces.purge_workspace import DispatchWorkspaceDeletion
 from aether.config import Settings
 from aether.ports.email import EmailPort
 from aether.ports.embedding import EmbeddingProviderPort
@@ -32,8 +37,9 @@ from aether.ports.ingestion_queue import IngestionQueuePort
 from aether.ports.ingestion_repository import IngestionRepositoryPort
 from aether.ports.malware_scan import MalwareScanPort
 from aether.ports.outbox import OutboxRepositoryPort
-from aether.ports.security import ClockPort
+from aether.ports.security import ClockPort, IdPort
 from aether.ports.storage import ObjectStoragePort
+from aether.ports.workspace_deletion import WorkspaceDeletionPort
 
 
 @dataclass
@@ -48,8 +54,11 @@ class WorkerContainer:
     scanner: MalwareScanPort
     ingestion_repository: IngestionRepositoryPort
     embedder: EmbeddingProviderPort
+    ids: IdPort
+    workspace_deletion_repository: WorkspaceDeletionPort
     dispatch_email_outbox: DispatchEmailOutbox
     dispatch_ingestion_outbox: DispatchIngestionOutbox
+    dispatch_workspace_deletion: DispatchWorkspaceDeletion
     process_document: DocumentProcessor
     """The real ingestion-pipeline handler (issue #46), passed to
     app.ingestion.consume_queue.run_ingestion_consumer by workers/main.py
@@ -104,6 +113,8 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
     scanner = ClamAvScanner(host=settings.clamav_host, port=settings.clamav_port)
     ingestion_repository = PostgresIngestionRepository(db_pool)
     embedder = _build_embedder(settings)
+    ids = Uuid7Generator()
+    workspace_deletion_repository = PostgresWorkspaceDeletionRepository(db_pool)
 
     return WorkerContainer(
         db_pool=db_pool,
@@ -116,9 +127,18 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
         scanner=scanner,
         ingestion_repository=ingestion_repository,
         embedder=embedder,
+        ids=ids,
+        workspace_deletion_repository=workspace_deletion_repository,
         dispatch_email_outbox=DispatchEmailOutbox(outbox=outbox, email=email, clock=clock),
         dispatch_ingestion_outbox=DispatchIngestionOutbox(
             outbox=outbox, queue=ingestion_queue, clock=clock
+        ),
+        dispatch_workspace_deletion=DispatchWorkspaceDeletion(
+            outbox=outbox,
+            repository=workspace_deletion_repository,
+            object_storage=object_storage,
+            clock=clock,
+            ids=ids,
         ),
         process_document=DocumentProcessor(
             object_storage=object_storage,

@@ -405,3 +405,37 @@ class ChunkDraft:
     char_start: int
     char_end: int
     token_count: int
+
+
+class DeletionJobStatus(StrEnum):
+    """A workspace-deletion saga's progress (DF-3, §8.1). Both
+    terminal states (COMPLETE/FAILED) require ``completed_at`` set —
+    QUEUED/RUNNING are the only "still in flight" values, matching
+    ``DocumentStatus``'s "in-progress vs terminal" shape."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class DeletionJob:
+    """One workspace-deletion saga run (DF-3, §8.1) — tracks the async
+    cascade from the instant soft-delete marker (unchanged, existing
+    behavior) through the worker's real object-storage purge and the
+    workspace row's eventual hard-delete. ``evidence`` accumulates real
+    per-store counts (objects purged, documents covered) once the saga
+    completes, never a fabricated or placeholder payload. Deliberately
+    has no FK to ``workspaces`` — see the migration's docstring for why
+    the job row must outlive the very cascade it documents."""
+
+    id: UUID
+    workspace_id: UUID
+    requested_by: UUID
+    status: DeletionJobStatus
+    evidence: dict[str, Any]
+    failure_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
