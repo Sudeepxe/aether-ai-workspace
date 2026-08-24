@@ -71,11 +71,18 @@ test("register, log in, send a message, and see the streamed refusal settle", as
   await goodButton.click();
   await expect(goodButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 });
 
+  // Generous timeouts below (not this file's usual 10s): this assertion
+  // runs concurrently with grounded-chat.spec.ts's real upload/scan/
+  // ingestion pipeline under Playwright's default multi-worker
+  // parallelism, and CI runners are far more resource-constrained than
+  // a dev machine — a real, observed CI flake at 10s (the round trip
+  // itself is already proven complete by the aria-pressed assertion
+  // above, which only passes once the server write has landed).
   await page.reload();
-  await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("button", { name: "Good response" })).toHaveAttribute(
     "aria-pressed",
     "true",
-    { timeout: 10_000 },
+    { timeout: 20_000 },
   );
 });
