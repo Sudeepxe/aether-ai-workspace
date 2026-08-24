@@ -29,8 +29,8 @@ class PostgresWorkspaceDeletionRepository:
             await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
             row = await conn.fetchrow(
                 "SELECT id, workspace_id, requested_by, status, evidence, failure_reason, "
-                "created_at, updated_at, completed_at FROM deletion_jobs "
-                "WHERE id = $1 AND workspace_id = $2",
+                "created_at, updated_at, completed_at, verified_at, verification_passed "
+                "FROM deletion_jobs WHERE id = $1 AND workspace_id = $2",
                 job_id,
                 workspace_id,
             )
@@ -115,4 +115,6 @@ def _row_to_job(row: asyncpg.Record) -> DeletionJob:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         completed_at=row["completed_at"],
+        verified_at=row["verified_at"],
+        verification_passed=row["verification_passed"],
     )

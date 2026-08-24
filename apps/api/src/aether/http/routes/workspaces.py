@@ -79,6 +79,8 @@ def _to_deletion_job_response(job: DeletionJob) -> DeletionJobResponse:
         created_at=job.created_at,
         updated_at=job.updated_at,
         completed_at=job.completed_at,
+        verified_at=job.verified_at,
+        verification_passed=job.verification_passed,
     )
 
 

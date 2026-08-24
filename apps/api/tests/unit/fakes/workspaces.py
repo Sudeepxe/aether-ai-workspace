@@ -159,6 +159,8 @@ class FakeDeletionJobRepository:
             created_at=now,
             updated_at=now,
             completed_at=None,
+            verified_at=None,
+            verification_passed=None,
         )
         self._rows[id] = job
         return job

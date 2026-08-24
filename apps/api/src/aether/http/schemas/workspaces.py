@@ -39,6 +39,8 @@ class DeletionJobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
+    verified_at: datetime | None
+    verification_passed: bool | None
 
 
 class ExportJobResponse(BaseModel):

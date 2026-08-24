@@ -30,6 +30,8 @@ def _queued_job(workspace_id: UUID, job_id: UUID) -> DeletionJob:
         created_at=now,
         updated_at=now,
         completed_at=None,
+        verified_at=None,
+        verification_passed=None,
     )
 
 

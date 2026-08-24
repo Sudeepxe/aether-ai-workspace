@@ -428,7 +428,14 @@ class DeletionJob:
     per-store counts (objects purged, documents covered) once the saga
     completes, never a fabricated or placeholder payload. Deliberately
     has no FK to ``workspaces`` — see the migration's docstring for why
-    the job row must outlive the very cascade it documents."""
+    the job row must outlive the very cascade it documents.
+
+    ``verified_at``/``verification_passed`` are a second, independent
+    dimension from ``status`` (issue #86, NFR-PR-1) — a real, separate
+    residue sweep run some time after completion, not the saga's own
+    self-reported success. Both are ``None`` until that sweep runs;
+    ``None`` is never conflated with "passed", only an actual sweep
+    result sets ``verification_passed`` to a real bool."""
 
     id: UUID
     workspace_id: UUID
@@ -439,6 +446,8 @@ class DeletionJob:
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
+    verified_at: datetime | None
+    verification_passed: bool | None
 
 
 class ExportJobStatus(StrEnum):

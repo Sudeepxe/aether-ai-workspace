@@ -26,6 +26,9 @@ class FakeObjectStorage:
     async def upload(self, *, key: str, content: bytes, content_type: str) -> None:
         self._objects[key] = content
 
+    async def list_prefix(self, *, prefix: str) -> list[str]:
+        return [key for key in self._objects if key.startswith(prefix)]
+
     def presign_upload(self, **kwargs: object) -> object:  # pragma: no cover - unused by handler
         raise NotImplementedError
 

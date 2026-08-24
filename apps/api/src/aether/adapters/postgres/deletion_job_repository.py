@@ -26,7 +26,7 @@ class PostgresDeletionJobRepository:
             INSERT INTO deletion_jobs (id, workspace_id, requested_by)
             VALUES ($1, $2, $3)
             RETURNING id, workspace_id, requested_by, status, evidence, failure_reason,
-                      created_at, updated_at, completed_at
+                      created_at, updated_at, completed_at, verified_at, verification_passed
             """,
             id,
             workspace_id,
@@ -38,8 +38,8 @@ class PostgresDeletionJobRepository:
     async def get_by_id(self, workspace_id: UUID, job_id: UUID) -> DeletionJob | None:
         row = await self._conn.fetchrow(
             "SELECT id, workspace_id, requested_by, status, evidence, failure_reason, "
-            "created_at, updated_at, completed_at FROM deletion_jobs "
-            "WHERE workspace_id = $1 AND id = $2",
+            "created_at, updated_at, completed_at, verified_at, verification_passed "
+            "FROM deletion_jobs WHERE workspace_id = $1 AND id = $2",
             workspace_id,
             job_id,
         )
@@ -57,4 +57,6 @@ def _row_to_job(row: asyncpg.Record) -> DeletionJob:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         completed_at=row["completed_at"],
+        verified_at=row["verified_at"],
+        verification_passed=row["verification_passed"],
     )
