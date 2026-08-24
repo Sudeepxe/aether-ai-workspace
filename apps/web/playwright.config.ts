@@ -9,6 +9,15 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
+  // Serialized in CI: every spec here drives one real, single-process
+  // API+worker (not per-test isolated infra) plus a real, IP-keyed AUTH
+  // rate limiter (10 req/60s, §7.5). Running spec files across parallel
+  // workers (Playwright's default) let a heavy real spec (upload/
+  // ClamAV-scan/ingest) starve a concurrent lightweight one on that
+  // shared process, and let concurrent register/login flows collide on
+  // the shared AUTH bucket — both real, observed CI flakes, not product
+  // bugs. Local dev keeps the default worker count for fast iteration.
+  workers: process.env["CI"] ? 1 : undefined,
   retries: process.env["CI"] ? 1 : 0,
   reporter: process.env["CI"] ? [["github"], ["html", { open: "never" }]] : "list",
   use: {
