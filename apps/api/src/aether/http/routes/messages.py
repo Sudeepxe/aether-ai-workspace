@@ -20,13 +20,18 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from aether.app.chat.get_generation_status import GetGenerationStatusCommand
 from aether.app.chat.send_message import SendMessageCommand
-from aether.domain.entities import Membership
+from aether.domain.entities import ApiKeyScope
 from aether.domain.policy import CREATE_MESSAGES
 from aether.http import sse
-from aether.http.authz import AuthRequirement, require_capability, route_auth
+from aether.http.authz import AuthRequirement, route_auth
 from aether.http.composition import Container
-from aether.http.deps import get_chat_authorization, get_container
-from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
+from aether.http.deps import (
+    ChatPrincipal,
+    get_chat_authorization,
+    get_container,
+    require_chat_scope,
+)
+from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user_or_api_key
 from aether.http.schemas.threads import SendMessageRequest
 
 router = APIRouter(prefix="/v1", tags=["messages"])
@@ -38,7 +43,7 @@ _SSE_MEDIA_TYPE = "text/event-stream"
     "/workspaces/{workspace_id}/threads/{thread_id}/messages",
     response_model=None,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
-    dependencies=[Depends(rate_limit_by_user(RateLimitClass.HEAVY))],
+    dependencies=[Depends(rate_limit_by_user_or_api_key(RateLimitClass.HEAVY))],
 )
 async def send_message(
     workspace_id: UUID,
@@ -46,9 +51,9 @@ async def send_message(
     body: SendMessageRequest,
     request: Request,
     container: Container = Depends(get_container),
-    caller_membership: Membership = Depends(get_chat_authorization),
+    principal: ChatPrincipal = Depends(get_chat_authorization),
 ) -> StreamingResponse | JSONResponse:
-    require_capability(caller_membership.role, CREATE_MESSAGES)
+    require_chat_scope(principal, CREATE_MESSAGES, ApiKeyScope.CHAT_WRITE)
 
     last_event_id = request.headers.get("Last-Event-ID")
     wants_stream = _SSE_MEDIA_TYPE in (request.headers.get("accept") or "")

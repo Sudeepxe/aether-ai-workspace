@@ -30,6 +30,7 @@ from aether.adapters.local.truncating_memory_compaction import TruncatingMemoryC
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.openai.completion import OpenAiCompletionAdapter
 from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
+from aether.adapters.postgres.api_key_repository import PostgresApiKeyRepository
 from aether.adapters.postgres.audit_log import PostgresAuditLog
 from aether.adapters.postgres.budget_repository import PostgresBudgetRepository
 from aether.adapters.postgres.chunk_search import PooledChunkSearch
@@ -61,6 +62,10 @@ from aether.adapters.redis.rate_limiter import (
     RedisTokenBucketRateLimiter,
 )
 from aether.adapters.redis.stream_buffer import RedisStreamBuffer
+from aether.app.api_keys.create_api_key import CreateApiKey
+from aether.app.api_keys.list_api_keys import ListApiKeys
+from aether.app.api_keys.revoke_api_key import RevokeApiKey
+from aether.app.api_keys.verify_api_key import VerifyApiKey
 from aether.app.auth.login_user import LoginUser
 from aether.app.auth.logout_user import LogoutUser
 from aether.app.auth.refresh_session import RefreshSession
@@ -114,6 +119,7 @@ from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.query_rewrite import QueryRewritePort
 from aether.ports.rate_limit import RateLimitPort
 from aether.ports.repositories import (
+    ApiKeyRepositoryPort,
     CitationRepositoryPort,
     DeletionJobRepositoryPort,
     DocumentRepositoryPort,
@@ -139,6 +145,10 @@ from aether.ports.streaming import CancellationPort, StreamBufferPort
 class Container:
     db_pool: asyncpg.Pool
     redis_client: redis_asyncio.Redis
+    env: str
+    """Threaded into CreateApiKey — the ``aeth_{env}_...`` key-format
+    segment (§7.4) — not stored anywhere else in Container since nothing
+    before API keys needed the raw env string at the composition layer."""
 
     users: UserRepositoryPort
     refresh_tokens: RefreshTokenRepositoryPort
@@ -148,6 +158,11 @@ class Container:
     per-request tenant context — this is the instance used for the
     accept-by-token lookup, which by definition runs before any tenant
     scope is known. See http/deps.py's get_invitation_acceptance_scope."""
+    api_keys: ApiKeyRepositoryPort
+    """Pool-bound, RLS-exempt (same reason as invitations) — the
+    instance used for verify_api_key's global by-prefix lookup, which by
+    definition runs before any tenant scope is known."""
+    verify_api_key: VerifyApiKey
     password_reset_tokens: PasswordResetTokenRepositoryPort
     hasher: PasswordHasherPort
     tokens: TokenPort
@@ -226,6 +241,7 @@ class WorkspaceScope:
     export_jobs: ExportJobRepositoryPort
     memberships: MembershipRepositoryPort
     invitations: InvitationRepositoryPort
+    api_keys: ApiKeyRepositoryPort
     threads: ThreadRepositoryPort
     messages: MessageRepositoryPort
     citations: CitationRepositoryPort
@@ -246,6 +262,9 @@ class WorkspaceScope:
     remove_member: RemoveMember
     create_invitation: CreateInvitation
     revoke_invitation: RevokeInvitation
+    create_api_key: CreateApiKey
+    list_api_keys: ListApiKeys
+    revoke_api_key: RevokeApiKey
     create_thread: CreateThread
     get_thread: GetThread
     list_threads: ListThreads
@@ -269,12 +288,14 @@ def build_workspace_scope(
     clock: ClockPort,
     ids: IdPort,
     object_storage: ObjectStoragePort,
+    env: str,
 ) -> WorkspaceScope:
     workspaces = PostgresWorkspaceRepository(conn)
     deletion_jobs = PostgresDeletionJobRepository(conn)
     export_jobs = PostgresExportJobRepository(conn)
     memberships = PostgresMembershipRepository(conn)
     invitations = PostgresInvitationRepository(conn)
+    api_keys = PostgresApiKeyRepository(conn)
     threads = PostgresThreadRepository(conn)
     messages = PostgresMessageRepository(conn)
     citations = PostgresCitationRepository(conn)
@@ -291,6 +312,7 @@ def build_workspace_scope(
         export_jobs=export_jobs,
         memberships=memberships,
         invitations=invitations,
+        api_keys=api_keys,
         threads=threads,
         messages=messages,
         citations=citations,
@@ -321,6 +343,9 @@ def build_workspace_scope(
             invitations=invitations, audit_log=audit_log, outbox=outbox, clock=clock, ids=ids
         ),
         revoke_invitation=RevokeInvitation(invitations=invitations, audit_log=audit_log, ids=ids),
+        create_api_key=CreateApiKey(api_keys=api_keys, audit_log=audit_log, ids=ids, env=env),
+        list_api_keys=ListApiKeys(api_keys=api_keys),
+        revoke_api_key=RevokeApiKey(api_keys=api_keys, audit_log=audit_log, clock=clock, ids=ids),
         create_thread=CreateThread(threads=threads, ids=ids),
         get_thread=GetThread(threads=threads),
         list_threads=ListThreads(threads=threads),
@@ -348,6 +373,7 @@ async def resolve_workspace_scope(
     clock: ClockPort,
     ids: IdPort,
     object_storage: ObjectStoragePort,
+    env: str,
 ) -> WorkspaceScope | None:
     """Looks up the caller's membership under ``conn`` (which must already
     have ``app.tenant_id`` set to ``workspace_id`` — see
@@ -365,6 +391,7 @@ async def resolve_workspace_scope(
         clock=clock,
         ids=ids,
         object_storage=object_storage,
+        env=env,
     )
 
 
@@ -429,6 +456,7 @@ async def build_container(settings: Settings) -> Container:
     users = PostgresUserRepository(db_pool)
     refresh_tokens = PostgresRefreshTokenRepository(db_pool)
     invitations = PostgresInvitationRepository(db_pool)
+    api_keys = PostgresApiKeyRepository(db_pool)
     password_reset_tokens = PostgresPasswordResetTokenRepository(db_pool)
     audit_log = PostgresAuditLog(db_pool)
     outbox = PostgresOutboxRepository(db_pool)
@@ -440,6 +468,7 @@ async def build_container(settings: Settings) -> Container:
     )
     clock = SystemClock()
     ids = Uuid7Generator()
+    verify_api_key = VerifyApiKey(api_keys=api_keys, clock=clock)
     revocations = RedisJtiDenylist(redis_client)
     rate_limiter = FailOpenRateLimiter(
         RedisTokenBucketRateLimiter(redis_client, clock=clock),
@@ -487,9 +516,12 @@ async def build_container(settings: Settings) -> Container:
     return Container(
         db_pool=db_pool,
         redis_client=redis_client,
+        env=settings.env,
         users=users,
         refresh_tokens=refresh_tokens,
         invitations=invitations,
+        api_keys=api_keys,
+        verify_api_key=verify_api_key,
         password_reset_tokens=password_reset_tokens,
         hasher=hasher,
         tokens=tokens,

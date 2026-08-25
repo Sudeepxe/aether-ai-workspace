@@ -110,6 +110,14 @@ RLS_VIOLATION_TOTAL = Counter(
     "security invariant violation, should be exactly 0 in normal operation",
 )
 
+API_KEY_AUTH_TOTAL = Counter(
+    "aether_api_key_auth_total",
+    "API-key authentication attempts (S10 #105, §7.6 anomaly monitoring: a spike in "
+    "'invalid' or a new key_id's first 'success' are the kind of volume/novelty "
+    "signals this feeds), labeled by outcome",
+    labelnames=("outcome",),
+)
+
 
 def metrics_endpoint() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
