@@ -33,6 +33,7 @@ from aether.domain.errors import (
     ExportJobNotFoundError,
     FeedbackNotEligibleError,
     GenerationNotFoundError,
+    IdempotencyKeyConflictError,
     InvalidAccessTokenError,
     InvalidApiKeyError,
     InvalidInvitationError,
@@ -50,6 +51,7 @@ from aether.domain.errors import (
 )
 from aether.http.authz import assert_all_routes_declare_auth
 from aether.http.composition import build_container
+from aether.http.idempotency import IdempotentReplay
 from aether.http.problem_json import install_error_handlers
 from aether.http.routes.api_keys import router as api_keys_router
 from aether.http.routes.auth import router as auth_router
@@ -111,6 +113,9 @@ _ERROR_STATUS: dict[type[DomainError], int] = {
     # error.
     NoProviderAvailableError: 503,
     BudgetConcurrencyConflictError: 409,
+    # A reused Idempotency-Key with a different request body (ADR-4.6) —
+    # a genuine client bug, not a legitimate retry.
+    IdempotencyKeyConflictError: 409,
 }
 
 
@@ -236,6 +241,18 @@ def create_app() -> FastAPI:
     app.include_router(api_keys_router)
 
     install_error_handlers(app, error_status=_ERROR_STATUS)
+
+    @app.exception_handler(IdempotentReplay)
+    async def _idempotent_replay_handler(request: Request, exc: Exception) -> Response:
+        # Not a DomainError -> not Problem+JSON: this is a successful
+        # response being replayed, not a failure (ADR-4.6).
+        assert isinstance(exc, IdempotentReplay)  # noqa: S101 — registered for this type only
+        return Response(
+            content=exc.body,
+            media_type="application/json",
+            status_code=exc.status_code,
+            headers={"Idempotent-Replay": "true"},
+        )
 
     assert_all_routes_declare_auth(app)  # ADR-4.5 — a boot failure, not a test-only check
 

@@ -17,6 +17,7 @@ from aether.domain.policy import MANAGE_API_KEYS
 from aether.http.authz import AuthRequirement, require_capability, route_auth
 from aether.http.composition import WorkspaceScope
 from aether.http.deps import get_workspace_scope
+from aether.http.idempotency import IdempotencyAwareRoute, idempotency_guard
 from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
 from aether.http.schemas.api_keys import (
     ApiKeyListResponse,
@@ -25,7 +26,7 @@ from aether.http.schemas.api_keys import (
     CreateApiKeyResponse,
 )
 
-router = APIRouter(prefix="/v1", tags=["api-keys"])
+router = APIRouter(prefix="/v1", tags=["api-keys"], route_class=IdempotencyAwareRoute)
 
 
 def _to_api_key_response(api_key: ApiKey) -> ApiKeyResponse:
@@ -47,7 +48,10 @@ def _to_api_key_response(api_key: ApiKey) -> ApiKeyResponse:
     response_model=CreateApiKeyResponse,
     status_code=status.HTTP_201_CREATED,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
-    dependencies=[Depends(rate_limit_by_user(RateLimitClass.AUTH))],
+    dependencies=[
+        Depends(rate_limit_by_user(RateLimitClass.AUTH)),
+        Depends(idempotency_guard),
+    ],
 )
 async def create_api_key(
     workspace_id: UUID,
