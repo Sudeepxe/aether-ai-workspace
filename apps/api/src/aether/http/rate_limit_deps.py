@@ -7,11 +7,14 @@ coarser per-IP anti-abuse pass (§3.6.3's "Edge: coarse per-IP" is a
 different mechanism at a different layer; this app-tier bucket happens
 to also look at IP only because no other identity exists pre-auth).
 
-Only per-user buckets are implemented — per-workspace and per-API-key
-dimensions are deliberately deferred: no workspace-scoped *heavy* route
-(chat, upload) exists yet to need one, and api_keys doesn't exist as a
-table at all. Adding those dimensions is the same shape of change as
-this file, not a redesign, when their routes land.
+Per-workspace buckets are deliberately still deferred: no route needs
+one yet. The per-API-key dimension (``rate_limit_by_user_or_api_key``)
+exists alongside the per-user one (``rate_limit_by_user``) — §4.3's
+``S,K`` routes (chat) accept either credential type on the same
+Authorization header, so their rate limiter must too; a bare
+``rate_limit_by_user`` on such a route would force ``get_current_session``
+to reject any API-key caller before the route's own, API-key-aware
+authorization dependency ever runs.
 """
 
 from __future__ import annotations
@@ -21,8 +24,14 @@ from enum import StrEnum
 
 from fastapi import Depends, HTTPException, Request, status
 
+from aether.app.api_keys.verify_api_key import ApiKeyPrincipal
 from aether.http.composition import Container
-from aether.http.deps import AuthenticatedSession, get_container, get_current_session
+from aether.http.deps import (
+    AuthenticatedSession,
+    get_container,
+    get_current_session,
+    get_session_or_api_key,
+)
 
 
 class RateLimitClass(StrEnum):
@@ -90,5 +99,31 @@ def rate_limit_by_user(
             rl_class=rl_class,
             identity=f"user:{session.user_id}",
         )
+
+    return _dependency
+
+
+def rate_limit_by_user_or_api_key(
+    rl_class: RateLimitClass,
+) -> Callable[[Request, Container, AuthenticatedSession | ApiKeyPrincipal], Awaitable[None]]:
+    """The API-key-eligible counterpart to ``rate_limit_by_user`` — for
+    routes that accept either credential type (§4.3's ``S,K`` column).
+    A human session and a machine key never share a bucket even if
+    presented for the same workspace: the key gets its own
+    ``apikey:{id}`` identity, distinct from ``user:{id}``, since a
+    machine integration's request volume shouldn't tighten (or loosen)
+    the human owner's own budget."""
+
+    async def _dependency(
+        request: Request,
+        container: Container = Depends(get_container),
+        session_or_key: AuthenticatedSession | ApiKeyPrincipal = Depends(get_session_or_api_key),
+    ) -> None:
+        identity = (
+            f"apikey:{session_or_key.api_key_id}"
+            if isinstance(session_or_key, ApiKeyPrincipal)
+            else f"user:{session_or_key.user_id}"
+        )
+        await _enforce(request=request, container=container, rl_class=rl_class, identity=identity)
 
     return _dependency

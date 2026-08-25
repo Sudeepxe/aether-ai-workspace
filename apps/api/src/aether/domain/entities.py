@@ -80,6 +80,41 @@ class Invitation:
     created_at: datetime
 
 
+class ApiKeyScope(StrEnum):
+    """§7.4's explicit scope model for machine credentials — deliberately
+    coarser and independent of MembershipRole's human-RBAC ladder (an API
+    key isn't "a Member", it's "allowed to do X"). Starts with exactly the
+    two scopes §7.4 names as examples; extend as API-key-eligible routes
+    grow (§4.3's ``S,K`` column)."""
+
+    CHAT_WRITE = "chat:write"
+    KB_READ = "kb:read"
+
+
+@dataclass(frozen=True, slots=True)
+class ApiKey:
+    """A workspace-scoped, hashed, revocable machine credential (FR-API-2,
+    §7.4). ``secret_hash`` is SHA-256 of the full raw key string — see
+    app.auth.api_keys' module docstring for why a fast hash is correct
+    here (identical reasoning to refresh/invitation/password-reset
+    tokens, app.auth.tokens.hash_token). ``prefix`` is the plaintext,
+    displayable identification portion (never the secret) — what a
+    caller sees again after creation, since the full raw key is shown
+    exactly once."""
+
+    id: UUID
+    workspace_id: UUID
+    prefix: str
+    secret_hash: str
+    name: str
+    scopes: frozenset[ApiKeyScope]
+    created_by: UUID
+    expires_at: datetime | None
+    revoked_at: datetime | None
+    last_used_at: datetime | None
+    created_at: datetime
+
+
 @dataclass(frozen=True, slots=True)
 class AuditEvent:
     """An immutable audit-log entry (FR-AD-1, §8.1). ``workspace_id`` is

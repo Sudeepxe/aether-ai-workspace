@@ -17,6 +17,8 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from aether.domain.entities import (
+    ApiKey,
+    ApiKeyScope,
     AuditEvent,
     Citation,
     CitationDraft,
@@ -43,6 +45,9 @@ from aether.domain.entities import (
 from aether.domain.errors import EmailAlreadyRegisteredError
 
 __all__ = [
+    "ApiKey",
+    "ApiKeyRepositoryPort",
+    "ApiKeyScope",
     "AuditEvent",
     "Citation",
     "CitationDraft",
@@ -211,6 +216,36 @@ class InvitationRepositoryPort(Protocol):
     async def consume(self, invitation_id: UUID, *, consumed_at: datetime) -> None: ...
 
     async def delete(self, workspace_id: UUID, invitation_id: UUID) -> None: ...
+
+
+class ApiKeyRepositoryPort(Protocol):
+    async def create(
+        self,
+        *,
+        id: UUID,
+        workspace_id: UUID,
+        prefix: str,
+        secret_hash: str,
+        name: str,
+        scopes: frozenset[ApiKeyScope],
+        created_by: UUID,
+        expires_at: datetime | None,
+    ) -> ApiKey: ...
+
+    async def get_by_prefix(self, prefix: str) -> ApiKey | None:
+        """Global lookup, not workspace-scoped — see this table's
+        migration docstring for why (verification has no tenant context
+        yet; the caller confirms ``workspace_id`` matches explicitly)."""
+        ...
+
+    async def list_by_workspace(self, workspace_id: UUID) -> list[ApiKey]: ...
+
+    async def revoke(self, workspace_id: UUID, key_id: UUID, *, revoked_at: datetime) -> None: ...
+
+    async def touch_last_used(self, key_id: UUID, *, used_at: datetime) -> None:
+        """Coarse, buffered — §7.8 F-4: an hourly-granularity async
+        upsert, not a write on every authenticated request."""
+        ...
 
 
 class PasswordResetTokenRepositoryPort(Protocol):

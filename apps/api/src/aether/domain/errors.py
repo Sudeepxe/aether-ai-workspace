@@ -135,3 +135,16 @@ class DeletionJobNotFoundError(DomainError):
 
 class ExportJobNotFoundError(DomainError):
     """Referenced export job id does not exist in this workspace."""
+
+
+class ApiKeyNotFoundError(DomainError):
+    """Referenced API key id does not exist in this workspace."""
+
+
+class InvalidApiKeyError(DomainError):
+    """A presented API key was malformed, unknown, revoked, or expired.
+    One error for all four cases, deliberately — the same enumeration-
+    safety posture as AuthenticationFailedError/InvalidInvitationError:
+    distinguishing "wrong secret" from "revoked" from "expired" would let
+    a caller probe for which of their leaked/guessed keys used to be
+    valid."""

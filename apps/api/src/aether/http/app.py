@@ -21,6 +21,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from aether.config import get_settings
 from aether.domain.errors import (
+    ApiKeyNotFoundError,
     AuthenticationFailedError,
     BudgetConcurrencyConflictError,
     BudgetExhaustedError,
@@ -33,6 +34,7 @@ from aether.domain.errors import (
     FeedbackNotEligibleError,
     GenerationNotFoundError,
     InvalidAccessTokenError,
+    InvalidApiKeyError,
     InvalidInvitationError,
     InvalidPasswordResetTokenError,
     InvalidRefreshTokenError,
@@ -49,6 +51,7 @@ from aether.domain.errors import (
 from aether.http.authz import assert_all_routes_declare_auth
 from aether.http.composition import build_container
 from aether.http.problem_json import install_error_handlers
+from aether.http.routes.api_keys import router as api_keys_router
 from aether.http.routes.auth import router as auth_router
 from aether.http.routes.documents import router as documents_router
 from aether.http.routes.generations import router as generations_router
@@ -72,6 +75,7 @@ _ERROR_STATUS: dict[type[DomainError], int] = {
     InvalidRefreshTokenError: 401,
     RefreshTokenReusedError: 401,
     InvalidAccessTokenError: 401,
+    InvalidApiKeyError: 401,
     UserNotFoundError: 404,
     WorkspaceNotFoundError: 404,
     MembershipNotFoundError: 404,
@@ -88,6 +92,7 @@ _ERROR_STATUS: dict[type[DomainError], int] = {
     MessageNotFoundError: 404,
     DeletionJobNotFoundError: 404,
     ExportJobNotFoundError: 404,
+    ApiKeyNotFoundError: 404,
     # The client claims an upload finished; storage disagrees — a
     # precondition failure on the caller's own claimed state, not a
     # server error.
@@ -228,6 +233,7 @@ def create_app() -> FastAPI:
     app.include_router(generations_router)
     app.include_router(metering_router)
     app.include_router(documents_router)
+    app.include_router(api_keys_router)
 
     install_error_handlers(app, error_status=_ERROR_STATUS)
 

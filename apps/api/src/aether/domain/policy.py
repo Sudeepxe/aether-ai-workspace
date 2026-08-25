@@ -26,6 +26,7 @@ MANAGE_MEMBERS: Capability = "manage_members"
 MANAGE_BUDGETS: Capability = "manage_budgets"
 READ_AUDIT_LOG: Capability = "read_audit_log"
 MANAGE_WORKSPACE: Capability = "manage_workspace"
+MANAGE_API_KEYS: Capability = "manage_api_keys"
 
 # Blueprint §7.3 matrix, transcribed exactly.
 _POLICY: dict[Capability, frozenset[MembershipRole]] = {
@@ -40,6 +41,8 @@ _POLICY: dict[Capability, frozenset[MembershipRole]] = {
     MANAGE_BUDGETS: frozenset({MembershipRole.ADMIN, MembershipRole.OWNER}),
     READ_AUDIT_LOG: frozenset({MembershipRole.ADMIN, MembershipRole.OWNER}),
     MANAGE_WORKSPACE: frozenset({MembershipRole.OWNER}),
+    # §7.3: "Budgets, model policy, API keys" — Admin/Owner.
+    MANAGE_API_KEYS: frozenset({MembershipRole.ADMIN, MembershipRole.OWNER}),
 }
 
 

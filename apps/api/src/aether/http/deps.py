@@ -10,13 +10,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Header, HTTPException, Request, status
 
+from aether.app.api_keys.verify_api_key import ApiKeyPrincipal
+from aether.app.auth.api_keys import is_api_key
 from aether.app.auth.tokens import hash_token
 from aether.app.invitations.accept_invitation import AcceptInvitation
 from aether.app.workspaces.create_workspace import CreateWorkspace
-from aether.domain.entities import Membership
+from aether.domain.entities import ApiKeyScope, MembershipRole
 from aether.domain.errors import InvalidAccessTokenError, WorkspaceNotFoundError
+from aether.domain.policy import Capability, role_may
 from aether.http.composition import (
     Container,
     WorkspaceScope,
@@ -55,6 +58,58 @@ async def get_current_session(
     return AuthenticatedSession(user_id=claims.sub, jti=claims.jti, expires_at=claims.expires_at)
 
 
+async def get_session_or_api_key(
+    container: Container = Depends(get_container),
+    authorization: str | None = Header(default=None),
+) -> AuthenticatedSession | ApiKeyPrincipal:
+    """The API-key-eligible counterpart to ``get_current_session`` — for
+    routes marked ``S,K`` in §4.3's resource catalog, which accept either
+    a human JWT session or a machine API key on the same Authorization
+    header. ``is_api_key`` distinguishes the two unambiguously (a JWT
+    never starts with ``aeth_``), so this never guesses."""
+    if authorization is None or not authorization.startswith("Bearer "):
+        raise InvalidAccessTokenError("missing bearer token")
+    token = authorization.removeprefix("Bearer ")
+
+    if is_api_key(token):
+        return await container.verify_api_key.execute(token)  # raises InvalidApiKeyError
+
+    claims = container.tokens.verify_access_token(token)  # raises InvalidAccessTokenError
+    if await container.revocations.is_denied(claims.jti):
+        raise InvalidAccessTokenError("token revoked")
+    return AuthenticatedSession(user_id=claims.sub, jti=claims.jti, expires_at=claims.expires_at)
+
+
+@dataclass(frozen=True, slots=True)
+class ChatPrincipal:
+    """Unifies the two authorization primitives §4.3's ``S,K`` routes
+    must accept: a human session's MembershipRole (checked via
+    domain.policy's role-capability table) or an API key's explicit
+    scope grant (§7.4 — a coarser, independent model; an API key isn't
+    "a Member", it's "allowed to do X"). Exactly one of the two fields
+    is set."""
+
+    role: MembershipRole | None
+    api_key_scopes: frozenset[ApiKeyScope] | None
+
+    def has_scope(self, capability: Capability, scope: ApiKeyScope) -> bool:
+        if self.api_key_scopes is not None:
+            return scope in self.api_key_scopes
+        assert self.role is not None  # noqa: S101 — exactly one field is always set
+        return role_may(self.role, capability)
+
+
+def require_chat_scope(
+    principal: ChatPrincipal, capability: Capability, scope: ApiKeyScope
+) -> None:
+    """The ChatPrincipal counterpart to http/authz.py's
+    ``require_capability`` — same 403-not-404 reasoning (§3.6.1: by the
+    time a route calls this, get_chat_authorization has already 404'd a
+    caller with no access to this workspace at all)."""
+    if not principal.has_scope(capability, scope):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient scope")
+
+
 def device_fingerprint(user_agent: str | None = Header(default=None)) -> str:
     """A coarse, real (not fabricated) device signal: the User-Agent header,
     hashed to a fixed-length value for storage. ADR-7.2 calls for *a*
@@ -85,6 +140,7 @@ async def get_workspace_scope(
             clock=container.clock,
             ids=container.ids,
             object_storage=container.object_storage,
+            env=container.env,
         )
         if scope is None:
             raise WorkspaceNotFoundError(str(workspace_id))
@@ -117,21 +173,32 @@ async def get_new_workspace_connection(
 
 async def get_chat_authorization(
     workspace_id: UUID,
-    session: AuthenticatedSession = Depends(get_current_session),
+    session_or_key: AuthenticatedSession | ApiKeyPrincipal = Depends(get_session_or_api_key),
     container: Container = Depends(get_container),
-) -> Membership:
+) -> ChatPrincipal:
     """Unlike ``get_workspace_scope``, this briefly acquires a connection
     to resolve the caller's membership and releases it immediately —
     chat routes must never hold a connection open for a token stream's
     duration (see ports.chat.MessageStorePort's docstring). Persistence
     for the actual chat turn goes through ``container.message_store``
-    instead, which manages its own short-lived connections per call."""
+    instead, which manages its own short-lived connections per call.
+
+    An API-key principal never needs a membership lookup at all — it's
+    already workspace-scoped by construction (the key belongs to exactly
+    one workspace); a key presented against a *different* workspace's
+    URL raises the same WorkspaceNotFoundError a human's missing
+    membership would (§3.7.1: no existence oracle either way)."""
+    if isinstance(session_or_key, ApiKeyPrincipal):
+        if session_or_key.workspace_id != workspace_id:
+            raise WorkspaceNotFoundError(str(workspace_id))
+        return ChatPrincipal(role=None, api_key_scopes=session_or_key.scopes)
+
     async with container.db_pool.acquire() as conn, conn.transaction():
         await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
-        membership = await resolve_caller_membership(conn, workspace_id, session.user_id)
+        membership = await resolve_caller_membership(conn, workspace_id, session_or_key.user_id)
     if membership is None:
         raise WorkspaceNotFoundError(str(workspace_id))
-    return membership
+    return ChatPrincipal(role=membership.role, api_key_scopes=None)
 
 
 async def get_invitation_acceptance_scope(

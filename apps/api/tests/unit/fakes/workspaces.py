@@ -6,6 +6,8 @@ from typing import Any
 from uuid import UUID
 
 from aether.domain.entities import (
+    ApiKey,
+    ApiKeyScope,
     AuditEvent,
     DeletionJob,
     DeletionJobStatus,
@@ -353,3 +355,80 @@ class FakeInvitationRepository:
         current = self._rows.get(invitation_id)
         if current is not None and current.workspace_id == workspace_id:
             del self._rows[invitation_id]
+
+
+class FakeApiKeyRepository:
+    def __init__(self) -> None:
+        self._rows: dict[UUID, ApiKey] = {}
+
+    async def create(
+        self,
+        *,
+        id: UUID,
+        workspace_id: UUID,
+        prefix: str,
+        secret_hash: str,
+        name: str,
+        scopes: frozenset[ApiKeyScope],
+        created_by: UUID,
+        expires_at: datetime | None,
+    ) -> ApiKey:
+        now = datetime.now().astimezone()
+        api_key = ApiKey(
+            id=id,
+            workspace_id=workspace_id,
+            prefix=prefix,
+            secret_hash=secret_hash,
+            name=name,
+            scopes=scopes,
+            created_by=created_by,
+            expires_at=expires_at,
+            revoked_at=None,
+            last_used_at=None,
+            created_at=now,
+        )
+        self._rows[id] = api_key
+        return api_key
+
+    async def get_by_prefix(self, prefix: str) -> ApiKey | None:
+        for api_key in self._rows.values():
+            if api_key.prefix == prefix:
+                return api_key
+        return None
+
+    async def list_by_workspace(self, workspace_id: UUID) -> list[ApiKey]:
+        return [k for k in self._rows.values() if k.workspace_id == workspace_id]
+
+    async def revoke(self, workspace_id: UUID, key_id: UUID, *, revoked_at: datetime) -> None:
+        current = self._rows.get(key_id)
+        if current is not None and current.workspace_id == workspace_id:
+            self._rows[key_id] = ApiKey(
+                id=current.id,
+                workspace_id=current.workspace_id,
+                prefix=current.prefix,
+                secret_hash=current.secret_hash,
+                name=current.name,
+                scopes=current.scopes,
+                created_by=current.created_by,
+                expires_at=current.expires_at,
+                revoked_at=revoked_at,
+                last_used_at=current.last_used_at,
+                created_at=current.created_at,
+            )
+
+    async def touch_last_used(self, key_id: UUID, *, used_at: datetime) -> None:
+        current = self._rows.get(key_id)
+        if current is not None:
+            self._rows[key_id] = ApiKey(
+                id=current.id,
+                workspace_id=current.workspace_id,
+                prefix=current.prefix,
+                secret_hash=current.secret_hash,
+                name=current.name,
+                scopes=current.scopes,
+                created_by=current.created_by,
+                expires_at=current.expires_at,
+                revoked_at=current.revoked_at,
+                last_used_at=used_at,
+                created_at=current.created_at,
+            )

@@ -26,6 +26,7 @@ from fastapi import APIRouter, FastAPI
 from aether.domain.entities import MembershipRole
 from aether.domain.policy import (
     CREATE_MESSAGES,
+    MANAGE_API_KEYS,
     MANAGE_BUDGETS,
     MANAGE_DOCUMENTS,
     MANAGE_MEMBERS,
@@ -130,6 +131,12 @@ _EXPECTED_ROUTE_AUTH: dict[tuple[str, str], AuthRequirement] = {
         "/v1/workspaces/{workspace_id}/documents/{document_id}",
         "DELETE",
     ): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/api-keys", "POST"): AuthRequirement.WORKSPACE_MEMBER,
+    ("/v1/workspaces/{workspace_id}/api-keys", "GET"): AuthRequirement.WORKSPACE_MEMBER,
+    (
+        "/v1/workspaces/{workspace_id}/api-keys/{key_id}",
+        "DELETE",
+    ): AuthRequirement.WORKSPACE_MEMBER,
 }
 
 
@@ -201,6 +208,7 @@ _EXPECTED_CAPABILITY_ROLES: dict[str, frozenset[MembershipRole]] = {
     MANAGE_BUDGETS: frozenset({MembershipRole.ADMIN, MembershipRole.OWNER}),
     READ_AUDIT_LOG: frozenset({MembershipRole.ADMIN, MembershipRole.OWNER}),
     MANAGE_WORKSPACE: frozenset({MembershipRole.OWNER}),
+    MANAGE_API_KEYS: frozenset({MembershipRole.ADMIN, MembershipRole.OWNER}),
 }
 
 
