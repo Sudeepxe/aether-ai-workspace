@@ -33,8 +33,19 @@ from fastapi.responses import JSONResponse
 
 from aether.domain.errors import DomainError
 from aether.logging import get_logger
+from aether.observability.metrics import RLS_VIOLATION_TOTAL
 
 log = get_logger(__name__)
+
+# Postgres SQLSTATE 42501 (insufficient_privilege) is the class RLS
+# WITH CHECK failures raise ("new row violates row-level security
+# policy for table ..."), but so are ordinary grant-missing errors —
+# checking the message substring too keeps the page-grade "RLS
+# violation (any)" alert (§10.4) from firing on an unrelated
+# misconfigured-grant bug, which is a different (still real, but
+# non-security) failure mode with its own remediation.
+_RLS_VIOLATION_SQLSTATE = "42501"
+_RLS_VIOLATION_MESSAGE_MARKER = "row-level security policy"
 
 _PROBLEM_MEDIA_TYPE = "application/problem+json"
 _CAMEL_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
@@ -144,6 +155,16 @@ def install_error_handlers(app: FastAPI, *, error_status: dict[type[DomainError]
     app.add_exception_handler(HTTPException, _http_exception_handler)
 
     async def _unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
+        if getattr(
+            exc, "sqlstate", None
+        ) == _RLS_VIOLATION_SQLSTATE and _RLS_VIOLATION_MESSAGE_MARKER in str(exc):
+            # A real forced-RLS WITH CHECK rejection reaching the HTTP
+            # layer at all is a "this should never happen" security
+            # invariant violation (§10.4's page-grade alert) — normal
+            # cross-tenant isolation is silent (empty result sets, see
+            # §3.6.1's taxonomy note), so this only fires on a genuine
+            # attempted policy violation, not routine denial.
+            RLS_VIOLATION_TOTAL.inc()
         log.error(
             "unhandled_exception",
             exc_type=exc.__class__.__name__,

@@ -1,0 +1,135 @@
+# Aether alert rules (S9 #96, §10.4). Every alert names its runbook
+# (Ch. 9's testable-docs rule) via a `runbook_url` annotation pointing
+# at docs/runbooks/<name>.md — that file must exist and be concretely
+# followable, not aspirational.
+#
+# Scope note — not every §10.4 ticket-grade signal is a Prometheus
+# rule: "eval-score regression", "flaky-test quarantine", and
+# "dependency criticals" are already enforced as CI gates (nightly eval
+# workflow, quarantine marker, pip-audit/npm-audit/trivy — Ch. 10's
+# pipeline) with no live metrics pipeline behind them (the AI-plane
+# dashboard's own notes explain why a live eval metric doesn't exist
+# yet). Duplicating a CI-only signal as a fake always-green Prometheus
+# rule would be worse than not having one — only "estimate-drift > 5%"
+# has a real underlying metric (Cost dashboard, #95) and gets a real
+# rule below.
+groups:
+  - name: aether-page-grade
+    rules:
+      - alert: SLOBurnRateHigh
+        expr: |
+          (
+            sum(rate(aether_http_request_duration_seconds_count{status=~"5.."}[1h]))
+            /
+            sum(rate(aether_http_request_duration_seconds_count[1h]))
+          ) > 0.02
+          and
+          (
+            sum(rate(aether_http_request_duration_seconds_count{status=~"5.."}[6h]))
+            /
+            sum(rate(aether_http_request_duration_seconds_count[6h]))
+          ) > 0.05
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Error-budget burn exceeds both the 1h (2%) and 6h (5%) thresholds"
+          runbook_url: "docs/runbooks/slo-burn-rate.md"
+
+      - alert: APIDown
+        expr: up{job="aether-api"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "The API is not responding to Prometheus scrapes"
+          runbook_url: "docs/runbooks/api-down.md"
+
+      - alert: OutboxDLQNonEmpty
+        expr: aether_outbox_dlq_depth > 0
+        for: 15m
+        labels: { severity: page }
+        annotations:
+          summary: "Outbox rows ({{ $labels.event_type }}) exhausted their dispatch attempts"
+          runbook_url: "docs/runbooks/dlq-non-empty.md"
+
+      - alert: IngestionDLQNonEmpty
+        expr: aether_ingestion_dlq_depth{job="aether-worker"} > 0
+        for: 15m
+        labels: { severity: page }
+        annotations:
+          summary: "Ingestion messages exhausted their delivery attempts"
+          runbook_url: "docs/runbooks/dlq-non-empty.md"
+
+      - alert: OutboxLagHigh
+        expr: aether_outbox_lag_seconds > 300
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Outbox ({{ $labels.event_type }}) has an undispatched row older than 5 minutes"
+          runbook_url: "docs/runbooks/outbox-lag-high.md"
+
+      - alert: AuthRefreshReuseDetected
+        expr: increase(aether_auth_refresh_reuse_total[5m]) > 0
+        for: 0m
+        labels: { severity: page }
+        annotations:
+          summary: "A refresh-token-reuse (theft signal, §7.6) was detected"
+          runbook_url: "docs/runbooks/refresh-reuse-detected.md"
+
+      - alert: RLSViolationDetected
+        expr: increase(aether_rls_violation_total{job="aether-api"}[5m]) > 0
+        for: 0m
+        labels: { severity: page }
+        annotations:
+          summary: "A genuine forced-RLS policy rejection reached the HTTP layer"
+          runbook_url: "docs/runbooks/rls-violation-detected.md"
+
+      - alert: TLSCertExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 14 * 86400
+        for: 1h
+        labels: { severity: page }
+        annotations:
+          summary: "TLS certificate for {{ $labels.instance }} expires in under 14 days"
+          runbook_url: "docs/runbooks/tls-cert-expiring.md"
+
+      - alert: DiskSpaceLow
+        expr: |
+          1 - (
+            node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}
+          ) > 0.8
+        for: 10m
+        labels: { severity: page }
+        annotations:
+          summary: "Disk usage on {{ $labels.instance }} ({{ $labels.mountpoint }}) exceeds 80%"
+          runbook_url: "docs/runbooks/disk-space-low.md"
+
+      - alert: GlobalBudgetNearCap
+        expr: |
+          aether_global_spend_microcents{job="aether-worker"}
+          /
+          aether_global_budget_cap_microcents{job="aether-worker"}
+          >= 0.9
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Global monthly spend has reached 90% of the hard cap (NFR-C-1)"
+          runbook_url: "docs/runbooks/global-budget-near-cap.md"
+
+  - name: aether-ticket-grade
+    rules:
+      - alert: CostEstimateDriftHigh
+        expr: |
+          abs(
+            increase(aether_admission_estimated_cost_microcents_total{job="aether-api"}[1h])
+            -
+            increase(aether_settled_cost_microcents_total{job="aether-api"}[1h])
+          )
+          /
+          clamp_min(increase(aether_settled_cost_microcents_total{job="aether-api"}[1h]), 1)
+          > 0.05
+        for: 1h
+        labels: { severity: ticket }
+        annotations:
+          summary: "Admission-time cost estimates have drifted >5% from settled actuals"
+          runbook_url: "docs/runbooks/cost-estimate-drift.md"

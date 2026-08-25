@@ -188,6 +188,18 @@ services:
       DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-aether}:${POSTGRES_PASSWORD:-aether-dev-only}@postgres:5432/${POSTGRES_DB:-aether}?sslmode=disable
     ports: ["9187:9187"]
 
+  # Real host disk/CPU/memory (§10.4's "disk > 80%" page-grade alert,
+  # #96) — the container/VM this compose stack actually runs on. cert-
+  # expiry monitoring (blackbox_exporter) is deliberately NOT added
+  # here: there's no real TLS endpoint to probe until S11's Caddy/demo
+  # profile exists (D10-1) — the alert rule is defined regardless (see
+  # infra/prometheus/rules/), it just has no live target yet. An honest
+  # gap, not a faked one.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2@sha256:4032c6d5bfd752342c3e631c2f1de93ba6b86c41db6b167b9a35372c139e7706
+    profiles: ["observability"]
+    ports: ["9100:9100"]
+
   redis-exporter:
     image: oliver006/redis_exporter:v1.62.0@sha256:c5a968ba5f30bab5e12181cceb89c4ed37cb4fe4d85490b5b66c7cfe4750b5e8
     profiles: ["observability"]

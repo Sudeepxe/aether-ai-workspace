@@ -7,6 +7,7 @@ import pytest
 from aether.app.auth.refresh_session import RefreshSession, RefreshSessionCommand
 from aether.app.auth.tokens import hash_refresh_token
 from aether.domain.errors import InvalidRefreshTokenError, RefreshTokenReusedError
+from aether.observability.metrics import AUTH_REFRESH_REUSE_TOTAL
 from tests.unit.fakes.auth import (
     FakeClock,
     FakeIdGenerator,
@@ -100,6 +101,7 @@ async def test_reused_token_outside_grace_window_revokes_family() -> None:
     )
     clock.advance(timedelta(seconds=31))  # just past the 30s grace window
 
+    before = AUTH_REFRESH_REUSE_TOTAL._value.get()
     with pytest.raises(RefreshTokenReusedError):
         await use_case.execute(
             RefreshSessionCommand(raw_refresh_token="raw-token-1", device_fingerprint="dev-1")
@@ -108,6 +110,9 @@ async def test_reused_token_outside_grace_window_revokes_family() -> None:
     old = await refresh_tokens.get_by_hash(hash_refresh_token("raw-token-1"))
     assert old is not None
     assert old.revoked_at == _START + timedelta(seconds=31)
+    # S9 #96's AuthRefreshReuseDetected page-grade alert needs a real
+    # detection point behind it, not just a rule that can never fire.
+    assert AUTH_REFRESH_REUSE_TOTAL._value.get() == before + 1
 
 
 async def test_reused_token_from_different_device_revokes_family_even_within_grace() -> None:
