@@ -20,6 +20,7 @@ import redis.asyncio as redis_asyncio
 from redis.exceptions import ResponseError
 
 from aether.ports.ingestion_queue import QueuedMessage
+from aether.ports.ingestion_queue_metrics import IngestionQueueStats
 
 _GROUP_NAME = "ingestion"
 _ROTATION_KEY = "ingest:rotation"
@@ -109,6 +110,30 @@ class RedisIngestionQueue:
         added = await self._client.sadd(_ROTATION_MEMBERS_KEY, tenant_id_str)  # type: ignore[misc]  # redis-py gap, not ours
         if added:
             await self._client.rpush(_ROTATION_KEY, tenant_id_str)  # type: ignore[misc]  # redis-py gap, not ours
+
+    async def get_stats(self) -> IngestionQueueStats:
+        """Not part of ``IngestionQueuePort`` — see
+        ``ports.ingestion_queue_metrics``'s docstring.
+
+        ``total_queued`` deliberately isn't ``XLEN`` (a stream's entry
+        count never shrinks on ``XACK`` — no trimming happens anywhere
+        in this codebase — so it would be a lifetime-total counter, not
+        a depth gauge). ``XINFO GROUPS``' ``lag`` (entries never yet
+        delivered to the group) plus ``pending`` (delivered, not yet
+        acked/failed) is the real "still needs work" count."""
+        tenant_ids = await self._client.smembers(_ROTATION_MEMBERS_KEY)  # type: ignore[misc]  # redis-py gap, not ours
+        total_queued = 0
+        for tenant_id_str in tenant_ids:
+            groups = await self._client.xinfo_groups(_stream_key(UUID(tenant_id_str)))
+            group = next((g for g in groups if g["name"] == _GROUP_NAME), None)
+            if group is not None:
+                total_queued += (group["lag"] or 0) + group["pending"]
+        dlq_depth = await self._client.xlen(_DLQ_STREAM)
+        return IngestionQueueStats(
+            total_queued=total_queued,
+            pending_tenants=len(tenant_ids),
+            dlq_depth=dlq_depth,
+        )
 
     async def _claim_pending_retry(self, stream_key: str, tenant_id: UUID) -> QueuedMessage | None:
         pending = await self._client.xpending_range(

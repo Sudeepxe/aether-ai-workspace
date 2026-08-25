@@ -30,8 +30,18 @@ from prometheus_client import start_http_server
 from aether.app.ingestion.consume_queue import run_ingestion_consumer
 from aether.config import get_settings
 from aether.logging import configure_logging, get_logger
-from aether.observability.metrics import OUTBOX_DLQ_DEPTH, OUTBOX_LAG_SECONDS
+from aether.observability.metrics import (
+    GLOBAL_BUDGET_CAP_MICROCENTS,
+    GLOBAL_SPEND_MICROCENTS,
+    INGESTION_DLQ_DEPTH,
+    INGESTION_PENDING_TENANTS,
+    INGESTION_QUEUE_DEPTH,
+    OUTBOX_DLQ_DEPTH,
+    OUTBOX_LAG_SECONDS,
+)
 from aether.observability.tracing import configure_tracing, instrument_libraries
+from aether.ports.cost_metrics import CostMetricsPort
+from aether.ports.ingestion_queue_metrics import IngestionQueueMetricsPort
 from aether.ports.outbox_metrics import OutboxMetricsPort
 from aether.workers.composition import build_worker_container
 
@@ -64,6 +74,17 @@ async def _record_outbox_gauges(outbox_metrics: OutboxMetricsPort) -> None:
         OUTBOX_DLQ_DEPTH.labels(event_type=event_type).set(stats.dlq_depth)
 
 
+async def _record_ingestion_gauges(ingestion_queue_metrics: IngestionQueueMetricsPort) -> None:
+    stats = await ingestion_queue_metrics.get_stats()
+    INGESTION_QUEUE_DEPTH.set(stats.total_queued)
+    INGESTION_PENDING_TENANTS.set(stats.pending_tenants)
+    INGESTION_DLQ_DEPTH.set(stats.dlq_depth)
+
+
+async def _record_cost_gauge(cost_metrics: CostMetricsPort) -> None:
+    GLOBAL_SPEND_MICROCENTS.set(await cost_metrics.get_global_spend_microcents())
+
+
 async def _run_async() -> None:
     settings = get_settings()
     configure_logging(level=settings.log_level, service_name="aether-worker")
@@ -75,6 +96,7 @@ async def _run_async() -> None:
     )
     instrument_libraries()
     start_http_server(settings.worker_metrics_port)
+    GLOBAL_BUDGET_CAP_MICROCENTS.set(settings.global_monthly_budget_microcents)
     container = await build_worker_container(settings)
 
     stop = asyncio.Event()
@@ -130,6 +152,8 @@ async def _run_async() -> None:
                     failed=verification_result.failed,
                 )
             await _record_outbox_gauges(container.outbox_metrics)
+            await _record_ingestion_gauges(container.ingestion_queue_metrics)
+            await _record_cost_gauge(container.cost_metrics)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=_POLL_INTERVAL_SECONDS)
             except TimeoutError:

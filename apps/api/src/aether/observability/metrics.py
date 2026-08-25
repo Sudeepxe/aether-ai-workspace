@@ -53,6 +53,52 @@ LLM_PROVIDER_FALLBACK_TOTAL = Counter(
     labelnames=("provider", "reason"),
 )
 
+INGESTION_STAGE_DURATION_SECONDS = Histogram(
+    "aether_ingestion_stage_duration_seconds",
+    "Per-stage duration of the document-ingestion pipeline (Ingestion dashboard, §10.4)",
+    labelnames=("stage",),
+)
+
+INGESTION_QUEUE_DEPTH = Gauge(
+    "aether_ingestion_queue_depth",
+    "Total pending ingestion messages across every tenant currently in rotation",
+)
+
+INGESTION_DLQ_DEPTH = Gauge(
+    "aether_ingestion_dlq_depth",
+    "Ingestion messages dead-lettered after exhausting delivery attempts",
+)
+
+INGESTION_PENDING_TENANTS = Gauge(
+    "aether_ingestion_pending_tenants",
+    "Distinct tenants with at least one pending ingestion message (fairness signal — "
+    "a real per-tenant depth breakdown is unbounded-cardinality and deliberately not "
+    "exposed as a metric; see Ingestion dashboard panel notes)",
+)
+
+GLOBAL_SPEND_MICROCENTS = Gauge(
+    "aether_global_spend_microcents",
+    "Cumulative settled spend against the global monthly cap (NFR-C-1, Cost dashboard)",
+)
+
+GLOBAL_BUDGET_CAP_MICROCENTS = Gauge(
+    "aether_global_budget_cap_microcents",
+    "The configured global monthly cap itself (NFR-C-1) — set once at worker startup "
+    "from settings, exposed as a metric so 'spend vs cap' is a real dashboard ratio "
+    "rather than a hardcoded threshold baked into a panel",
+)
+
+ADMISSION_ESTIMATED_COST_MICROCENTS_TOTAL = Counter(
+    "aether_admission_estimated_cost_microcents_total",
+    "Sum of pre-request ceiling estimates for admitted requests (§3.2.14) — "
+    "compared against settled actuals for estimate-vs-actual drift (Cost dashboard)",
+)
+
+SETTLED_COST_MICROCENTS_TOTAL = Counter(
+    "aether_settled_cost_microcents_total",
+    "Sum of actual settled cost from provider usage (the drift comparison's actual side)",
+)
+
 
 def metrics_endpoint() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

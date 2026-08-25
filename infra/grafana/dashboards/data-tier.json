@@ -1,0 +1,75 @@
+{
+  "uid": "aether-data-tier",
+  "title": "Aether / Data Tier",
+  "tags": ["aether", "data-tier"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Postgres connections in use",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "pg_stat_activity_count", "legendFormat": "{{datname}} / {{state}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Postgres up / database size",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "pg_up", "legendFormat": "up" },
+        { "expr": "pg_database_size_bytes", "legendFormat": "{{datname}} size" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Redis connected clients / memory",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "redis_connected_clients", "legendFormat": "clients" },
+        { "expr": "redis_memory_used_bytes", "legendFormat": "memory used" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Outbox lag by event type (page-grade alert at > 5min, §10.4)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "aether_outbox_lag_seconds", "legendFormat": "{{event_type}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Outbox DLQ depth by event type",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "aether_outbox_dlq_depth", "legendFormat": "{{event_type}}" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "text",
+      "title": "Notes",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Honest gap:** HNSW index memory and replication-readiness metrics (§10.4's spec) are not exposed by the standard `postgres_exporter` and pgvector has no dedicated exporter — `pg_database_size_bytes` and connection/activity stats are the real, live proxy available today. A pgvector-specific exporter or custom query is a scoped follow-up, not faked here.\n\nSingle-node topology (D10-1): there is no replica to report replication lag against — the metric would be meaningless until the scale-out trigger in `docs/architecture/10-deployment-operations.md` §10.7 fires."
+      }
+    }
+  ]
+}

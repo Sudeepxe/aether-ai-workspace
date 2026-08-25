@@ -19,6 +19,7 @@ from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
+from aether.adapters.postgres.cost_metrics_repository import PostgresCostMetricsRepository
 from aether.adapters.postgres.deletion_verification_repository import (
     PostgresDeletionVerificationRepository,
 )
@@ -39,10 +40,12 @@ from aether.app.workspaces.build_export import DispatchWorkspaceExport
 from aether.app.workspaces.purge_workspace import DispatchWorkspaceDeletion
 from aether.app.workspaces.verify_deletions import VerifyWorkspaceDeletions
 from aether.config import Settings
+from aether.ports.cost_metrics import CostMetricsPort
 from aether.ports.deletion_verification import DeletionVerificationPort
 from aether.ports.email import EmailPort
 from aether.ports.embedding import EmbeddingProviderPort
 from aether.ports.ingestion_queue import IngestionQueuePort
+from aether.ports.ingestion_queue_metrics import IngestionQueueMetricsPort
 from aether.ports.ingestion_repository import IngestionRepositoryPort
 from aether.ports.malware_scan import MalwareScanPort
 from aether.ports.outbox import OutboxRepositoryPort
@@ -73,6 +76,9 @@ class WorkerContainer:
     email: EmailPort
     clock: ClockPort
     ingestion_queue: IngestionQueuePort
+    ingestion_queue_metrics: IngestionQueueMetricsPort
+    """The same ``RedisIngestionQueue`` instance as ``ingestion_queue``,
+    narrowed to its stats port (S9, §10.4's Ingestion dashboard)."""
     object_storage: ObjectStoragePort
     scanner: MalwareScanPort
     ingestion_repository: IngestionRepositoryPort
@@ -81,6 +87,7 @@ class WorkerContainer:
     workspace_deletion_repository: WorkspaceDeletionPort
     workspace_export_repository: WorkspaceExportPort
     deletion_verification_repository: DeletionVerificationPort
+    cost_metrics: CostMetricsPort
     dispatch_email_outbox: DispatchEmailOutbox
     dispatch_ingestion_outbox: DispatchIngestionOutbox
     dispatch_workspace_deletion: DispatchWorkspaceDeletion
@@ -144,6 +151,7 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
     workspace_deletion_repository = PostgresWorkspaceDeletionRepository(db_pool)
     workspace_export_repository = PostgresWorkspaceExportRepository(db_pool)
     deletion_verification_repository = PostgresDeletionVerificationRepository(db_pool)
+    cost_metrics = PostgresCostMetricsRepository(db_pool)
 
     return WorkerContainer(
         db_pool=db_pool,
@@ -153,6 +161,7 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
         email=email,
         clock=clock,
         ingestion_queue=ingestion_queue,
+        ingestion_queue_metrics=ingestion_queue,
         object_storage=object_storage,
         scanner=scanner,
         ingestion_repository=ingestion_repository,
@@ -161,6 +170,7 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
         workspace_deletion_repository=workspace_deletion_repository,
         workspace_export_repository=workspace_export_repository,
         deletion_verification_repository=deletion_verification_repository,
+        cost_metrics=cost_metrics,
         dispatch_email_outbox=DispatchEmailOutbox(outbox=outbox, email=email, clock=clock),
         dispatch_ingestion_outbox=DispatchIngestionOutbox(
             outbox=outbox, queue=ingestion_queue, clock=clock

@@ -25,6 +25,10 @@ from uuid import UUID
 
 import asyncpg
 
+from aether.observability.metrics import (
+    ADMISSION_ESTIMATED_COST_MICROCENTS_TOTAL,
+    SETTLED_COST_MICROCENTS_TOTAL,
+)
 from aether.ports.metering import (
     AdmissionDecision,
     UsageEvent,
@@ -62,8 +66,15 @@ class PostgresBudgetAdmission:
         settled = row["settled_microcents"]
         projected = settled + ceiling_microcents
         soft_threshold = limit * row["soft_pct"] // 100
+        allowed = projected <= limit
+        if allowed:
+            # Only admitted requests actually spend against the ceiling
+            # estimate — a denied request's estimate never becomes real
+            # cost, so counting it would bias the drift comparison
+            # (Cost dashboard, §10.4) toward looking worse than reality.
+            ADMISSION_ESTIMATED_COST_MICROCENTS_TOTAL.inc(ceiling_microcents)
         return AdmissionDecision(
-            allowed=projected <= limit,
+            allowed=allowed,
             soft_limit_crossed=projected > soft_threshold,
             settled_microcents=settled,
             monthly_limit_microcents=limit,
@@ -138,6 +149,7 @@ class PostgresUsageLedger:
                 "updated_at = now() WHERE id = true",
                 cost_microcents,
             )
+        SETTLED_COST_MICROCENTS_TOTAL.inc(cost_microcents)
         return _row_to_usage_event(row)
 
     async def rollup(self, workspace_id: UUID, *, since: datetime) -> UsageRollup:

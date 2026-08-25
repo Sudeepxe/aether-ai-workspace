@@ -23,7 +23,9 @@ The ``document.uploaded`` payload contract this handler expects (issue
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from uuid import UUID
 
 from aether.app.ingestion.chunking import chunk_document
@@ -39,6 +41,7 @@ from aether.app.ingestion.type_detection import (
     detect_document_type,
 )
 from aether.domain.entities import Chunk, DocumentStatus
+from aether.observability.metrics import INGESTION_STAGE_DURATION_SECONDS
 from aether.ports.embedding import EmbeddingProviderError, EmbeddingProviderPort
 from aether.ports.ingestion_queue import QueuedMessage
 from aether.ports.ingestion_repository import IngestionRepositoryPort
@@ -61,6 +64,19 @@ _PERMANENT_PARSE_ERRORS = (
     HtmlParseError,
     TextParseError,
 )
+
+
+@contextmanager
+def _stage_timer(stage: str) -> Iterator[None]:
+    """Ingestion dashboard's "per-stage timing" panel (§10.4) — one
+    histogram observation per stage per document, regardless of
+    success/failure (a slow failing scan is exactly as dashboard-
+    relevant as a slow successful one)."""
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        INGESTION_STAGE_DURATION_SECONDS.labels(stage=stage).observe(time.perf_counter() - started)
 
 
 class DocumentProcessor:
@@ -88,7 +104,8 @@ class DocumentProcessor:
         )
         content = await self._object_storage.download(key=object_key)
 
-        scan_result = await self._scanner.scan(content)
+        with _stage_timer("scanning"):
+            scan_result = await self._scanner.scan(content)
         if not scan_result.clean:
             await self._repository.mark_failed(
                 workspace_id,
@@ -102,8 +119,9 @@ class DocumentProcessor:
             workspace_id, document_id, status=DocumentStatus.PARSING
         )
         try:
-            doc_type = detect_document_type(content, declared_mime=declared_mime)
-            nodes = _PARSERS[doc_type](content)
+            with _stage_timer("parsing"):
+                doc_type = detect_document_type(content, declared_mime=declared_mime)
+                nodes = _PARSERS[doc_type](content)
         except _PERMANENT_PARSE_ERRORS as exc:
             await self._repository.mark_failed(
                 workspace_id, document_id, stage="parsing", reason=str(exc)
@@ -113,14 +131,16 @@ class DocumentProcessor:
         await self._repository.update_status(
             workspace_id, document_id, status=DocumentStatus.CHUNKING
         )
-        chunks = chunk_document(nodes)
+        with _stage_timer("chunking"):
+            chunks = chunk_document(nodes)
 
         await self._repository.insert_chunks_and_advance(
             workspace_id, document_id, chunks=chunks, next_status=DocumentStatus.EMBEDDING
         )
 
         try:
-            await self._embed_and_finalize(workspace_id, document_id)
+            with _stage_timer("embedding"):
+                await self._embed_and_finalize(workspace_id, document_id)
         except EmbeddingProviderError as exc:
             if exc.retryable:
                 raise
