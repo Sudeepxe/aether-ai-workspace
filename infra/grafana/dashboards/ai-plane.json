@@ -1,0 +1,76 @@
+{
+  "uid": "aether-ai-plane",
+  "title": "Aether / AI Plane",
+  "tags": ["aether", "ai"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Provider TTFT p95 vs NFR-P-1 (grounded < 1.5s, ungrounded < 800ms)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(aether_llm_provider_ttft_seconds_bucket{outcome=\"success\"}[5m])) by (le, provider, model))",
+          "legendFormat": "{{provider}}/{{model}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Provider fallback rate (by reason)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(aether_llm_provider_fallback_total[5m])) by (provider, reason)",
+          "legendFormat": "{{provider}} ({{reason}})"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Grounded-chat requests per second",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(aether_http_request_duration_seconds_count{route=~\"/v1/threads/.*/messages\"}[5m]))",
+          "legendFormat": "chat requests/s"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "text",
+      "title": "Faithfulness / refusal / citation trends — not a live metric",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Honest gap, documented not faked:** faithfulness, refusal correctness, hallucinated-citation rate, retrieval hit rate, and threshold-refusal rate are all **eval-harness outputs** (§6.4), produced by the nightly/release eval run and published to `docs/evals/latest-report.md` (trend-charted there, not here).\n\nWiring these into a live Grafana panel would need either (a) a Pushgateway the nightly eval workflow pushes to, or (b) a Loki-scraped structured log of eval results — neither exists yet. Tracked as a real, scoped follow-up rather than faked with a metric that doesn't exist.\n\nSee: [latest eval report](../../../docs/evals/latest-report.md)."
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Cost per turn (settled, rolling)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "aether_settled_cost_microcents_total / count of grounded+ungrounded chat requests — an approximation (global, not per-turn-exact) since cost isn't itself request-labeled to avoid unbounded cardinality.",
+      "targets": [
+        {
+          "expr": "rate(aether_settled_cost_microcents_total{job=\"aether-api\"}[1h]) / clamp_min(sum(rate(aether_http_request_duration_seconds_count{route=~\"/v1/threads/.*/messages\"}[1h])), 1)",
+          "legendFormat": "microcents/turn"
+        }
+      ]
+    }
+  ]
+}

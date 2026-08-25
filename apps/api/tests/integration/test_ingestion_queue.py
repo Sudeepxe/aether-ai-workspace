@@ -99,6 +99,50 @@ async def test_poison_message_is_dead_lettered_after_max_deliveries(
     assert matching[0][1]["tenant_id"] == str(tenant_id)
 
 
+async def test_get_stats_reflects_real_queue_depth_pending_tenants_and_dlq(
+    redis_client: redis_asyncio.Redis,
+) -> None:
+    """S9 (§10.4's Ingestion dashboard): get_stats() isn't part of
+    IngestionQueuePort (see ports/ingestion_queue_metrics.py's
+    docstring) but must still be proven against real Redis, not assumed
+    correct from reading the XLEN/SCARD calls."""
+    queue = _queue(redis_client, max_deliveries=1)
+    tenant_a, tenant_b = uuid.uuid4(), uuid.uuid4()
+
+    empty = await queue.get_stats()
+    assert empty.total_queued == 0
+    assert empty.pending_tenants == 0
+    assert empty.dlq_depth == 0
+
+    await queue.enqueue(tenant_id=tenant_a, payload={"doc_id": "a1"})
+    await queue.enqueue(tenant_id=tenant_a, payload={"doc_id": "a2"})
+    await queue.enqueue(tenant_id=tenant_b, payload={"doc_id": "b1"})
+
+    populated = await queue.get_stats()
+    assert populated.total_queued == 3
+    assert populated.pending_tenants == 2
+    assert populated.dlq_depth == 0
+
+    # Dead-letter tenant_b's only message (max_deliveries=1: first fail
+    # already exhausts it) — total_queued (lag+pending, the real "still
+    # needs work" count) drops to just tenant_a's remaining backlog, and
+    # dlq_depth rises. pending_tenants stays 2, not 1: claim_next()
+    # optimistically reschedules a tenant the moment it hands out a
+    # message, before the caller's later ack/fail outcome is known — see
+    # claim_next()'s own docstring. That's a real, accepted imprecision
+    # in this fairness signal, not a test bug.
+    b_message = await queue.claim_next()
+    while b_message is not None and b_message.tenant_id != tenant_b:
+        b_message = await queue.claim_next()
+    assert b_message is not None
+    assert await queue.fail(b_message) is True
+
+    after_dlq = await queue.get_stats()
+    assert after_dlq.total_queued == 2
+    assert after_dlq.pending_tenants == 2
+    assert after_dlq.dlq_depth == 1
+
+
 async def test_a_failed_message_is_redelivered_with_incremented_delivery_count(
     redis_client: redis_asyncio.Redis,
 ) -> None:

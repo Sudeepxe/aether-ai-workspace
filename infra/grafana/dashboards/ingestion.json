@@ -1,0 +1,81 @@
+{
+  "uid": "aether-ingestion",
+  "title": "Aether / Ingestion",
+  "tags": ["aether", "ingestion"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Queue depth (across tenants in rotation)",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "aether_ingestion_queue_depth{job=\"aether-worker\"}",
+          "legendFormat": "queued"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "DLQ depth (page-grade alert at > 0, §10.4)",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "aether_ingestion_dlq_depth{job=\"aether-worker\"}",
+          "legendFormat": "dead-lettered"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Pending tenants (fairness signal)",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Distinct tenants with backlog — not a per-tenant depth breakdown (unbounded cardinality, deliberately not exposed as a metric). A sustained high count alongside a shallow total queue depth would indicate the round-robin fairness scheduler is working as intended (many tenants, each shallow) rather than one tenant starving the rest.",
+      "targets": [
+        {
+          "expr": "aether_ingestion_pending_tenants{job=\"aether-worker\"}",
+          "legendFormat": "tenants"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Per-stage duration p95 (scanning / parsing / chunking / embedding)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(aether_ingestion_stage_duration_seconds_bucket[5m])) by (le, stage))",
+          "legendFormat": "{{stage}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Outbox→queue relay lag (document.uploaded)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Age of the oldest undispatched document.uploaded outbox row — the relay step before a message even reaches the fair queue this dashboard's other panels track.",
+      "targets": [
+        {
+          "expr": "aether_outbox_lag_seconds{event_type=\"document.uploaded\"}",
+          "legendFormat": "relay lag"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    }
+  ]
+}

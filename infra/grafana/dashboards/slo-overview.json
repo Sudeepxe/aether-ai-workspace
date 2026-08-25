@@ -1,0 +1,76 @@
+{
+  "uid": "aether-slo-overview",
+  "title": "Aether / SLO Overview",
+  "tags": ["aether", "slo"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "API availability (up)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "up{job=\"aether-api\"}", "legendFormat": "api" },
+        { "expr": "up{job=\"aether-worker\"}", "legendFormat": "worker" }
+      ],
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Non-AI endpoint p95 latency vs NFR-P-3 (200ms)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Excludes the AI-facing chat routes — see the AI-plane dashboard for grounded/ungrounded TTFT against NFR-P-1.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(aether_http_request_duration_seconds_bucket{route!~\"/v1/threads/.*/messages\"}[5m])) by (le, route))",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "5xx error rate (error-budget burn signal)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(aether_http_request_duration_seconds_count{status=~\"5..\"}[5m])) / sum(rate(aether_http_request_duration_seconds_count[5m]))",
+          "legendFormat": "5xx ratio"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Request rate by route",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(aether_http_request_duration_seconds_count[5m])) by (route)",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "text",
+      "title": "Notes",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 16 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Multiwindow burn-rate alert (2%/1h ∧ 5%/6h, §10.4) is defined in Prometheus alert rules, not this dashboard** — see `infra/prometheus/rules/` (issue #96). This panel set is the human-facing view of the same underlying `aether_http_request_duration_seconds` series the alert evaluates."
+      }
+    }
+  ]
+}
