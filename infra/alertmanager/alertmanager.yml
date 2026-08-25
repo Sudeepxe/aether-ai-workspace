@@ -1,0 +1,12 @@
+# Alertmanager config (S9, §10.4) — scaffold only. A real receiver
+# (push notification + email per §10.4's solo-on-call framing) and the
+# page-grade/ticket-grade routing tree land in issue #96 alongside the
+# actual alert rules; this stub keeps the `observability` compose
+# profile bootable end-to-end (Prometheus needs a reachable
+# Alertmanager to start cleanly) without a real destination lying about
+# where pages go.
+route:
+  receiver: null-receiver
+
+receivers:
+  - name: null-receiver

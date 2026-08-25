@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request, Response
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from aether.config import get_settings
 from aether.domain.errors import (
@@ -58,6 +59,8 @@ from aether.http.routes.metering import router as metering_router
 from aether.http.routes.threads import router as threads_router
 from aether.http.routes.workspaces import router as workspaces_router
 from aether.logging import configure_logging, get_logger
+from aether.observability.metrics import http_metrics_middleware, metrics_endpoint
+from aether.observability.tracing import configure_tracing, current_trace_id, instrument_libraries
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -121,6 +124,13 @@ def create_app() -> FastAPI:
     """Build the application. Composition root for the HTTP process."""
     settings = get_settings()
     configure_logging(level=settings.log_level, service_name=settings.service_name)
+    configure_tracing(
+        service_name=settings.service_name,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+        sample_ratio=settings.otel_trace_sample_ratio,
+        environment=settings.env,
+    )
+    instrument_libraries()
 
     app = FastAPI(
         title="Aether AI Workspace API",
@@ -131,6 +141,13 @@ def create_app() -> FastAPI:
         redoc_url=None,
         lifespan=_lifespan,
     )
+    # Wraps the whole ASGI app (outside every Starlette-stack middleware
+    # below, incl. request_id_middleware) so a server span is already
+    # active by the time any of them run — this is what lets
+    # request_id_middleware read a real trace id instead of minting an
+    # uncorrelated one.
+    FastAPIInstrumentor.instrument_app(app)
+    app.middleware("http")(http_metrics_middleware)
 
     @app.middleware("http")
     async def request_id_middleware(
@@ -139,9 +156,16 @@ def create_app() -> FastAPI:
     ) -> Response:
         """Bind a correlation ID to every request (Blueprint NFR-O-1).
 
-        Honors an inbound X-Request-ID (edge-injected, §3.2.1) or mints one.
+        Honors an inbound X-Request-ID (edge-injected, §3.2.1) or mints
+        one — unless a real OTel trace is already active (the common
+        case once tracing is configured), in which case the trace id
+        itself *is* the correlation id, so logs/traces/Problem+JSON all
+        pivot on one identical value instead of two merely-correlated
+        ones.
         """
-        request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        request_id = (
+            current_trace_id() or request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        )
         # Set explicitly on request.state (not just structlog's context)
         # so Problem+JSON error handlers can read it directly — relying
         # on structlog's contextvars propagation across the exception-
@@ -190,6 +214,10 @@ def create_app() -> FastAPI:
         except Exception:  # readiness must never 500, only report not-ready
             return {"status": "degraded"}
         return {"status": "ok"}
+
+    @app.get("/metrics", tags=["ops"], include_in_schema=False)
+    async def metrics() -> Response:
+        return metrics_endpoint()
 
     app.include_router(auth_router)
     app.include_router(me_router)

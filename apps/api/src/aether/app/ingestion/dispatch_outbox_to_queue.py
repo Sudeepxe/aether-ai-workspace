@@ -22,6 +22,7 @@ from typing import Any
 
 import structlog
 
+from aether.observability.tracing import linked_span
 from aether.ports.ingestion_queue import IngestionQueuePort
 from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.security import ClockPort
@@ -58,26 +59,32 @@ class DispatchIngestionOutbox:
             # its workspace as tenant_id (see the document-creation use
             # case that writes it).
             assert entry.tenant_id is not None  # noqa: S101
-            try:
-                await self._queue.enqueue(
-                    tenant_id=entry.tenant_id,
-                    payload={
-                        **_stringify(entry.payload),
-                        "outbox_id": str(entry.id),
-                        "aggregate_id": str(entry.aggregate_id),
-                    },
-                )
-            except Exception:
-                await self._outbox.record_attempt_failure(entry.id)
-                failed += 1
-                log.error(
-                    "ingestion_dispatch_failed",
-                    outbox_id=str(entry.id),
-                    attempts=entry.attempts + 1,
-                )
-                continue
-            await self._outbox.mark_dispatched(entry.id, dispatched_at=self._clock.now())
-            dispatched += 1
+            with linked_span("outbox.dispatch.document.uploaded", entry.trace_context):
+                try:
+                    await self._queue.enqueue(
+                        tenant_id=entry.tenant_id,
+                        payload={
+                            **_stringify(entry.payload),
+                            "outbox_id": str(entry.id),
+                            "aggregate_id": str(entry.aggregate_id),
+                            # Forwarded, not consumed here — the relay
+                            # itself only XADDs; the real processing (and
+                            # the trace this context resumes) happens
+                            # later in run_ingestion_consumer.
+                            "trace_context": json.dumps(entry.trace_context),
+                        },
+                    )
+                except Exception:
+                    await self._outbox.record_attempt_failure(entry.id)
+                    failed += 1
+                    log.error(
+                        "ingestion_dispatch_failed",
+                        outbox_id=str(entry.id),
+                        attempts=entry.attempts + 1,
+                    )
+                    continue
+                await self._outbox.mark_dispatched(entry.id, dispatched_at=self._clock.now())
+                dispatched += 1
         return DispatchResult(dispatched=dispatched, failed=failed)
 
 

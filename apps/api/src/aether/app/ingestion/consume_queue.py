@@ -17,8 +17,10 @@ loop only checks ``stop`` between claims, never abandons in-flight work.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 
+from aether.observability.tracing import linked_span
 from aether.ports.ingestion_queue import IngestionQueuePort, QueuedMessage
 
 _DEFAULT_IDLE_POLL_SECONDS = 0.1
@@ -39,8 +41,10 @@ async def run_ingestion_consumer(
             except TimeoutError:
                 pass  # normal: nothing pending within this idle window
             continue
+        trace_context = json.loads(message.payload.get("trace_context", "{}"))
         try:
-            await handler(message)
+            with linked_span("ingestion.consume", trace_context):
+                await handler(message)
         except Exception:
             await queue.fail(message)
         else:

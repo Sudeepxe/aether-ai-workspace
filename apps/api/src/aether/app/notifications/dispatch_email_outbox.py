@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import structlog
 
+from aether.observability.tracing import linked_span
 from aether.ports.email import EmailMessage, EmailPort
 from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.security import ClockPort
@@ -45,28 +46,29 @@ class DispatchEmailOutbox:
         dispatched = 0
         failed = 0
         for entry in entries:
-            message = EmailMessage(
-                to=entry.payload["to"],
-                subject=entry.payload["subject"],
-                text_body=entry.payload["text_body"],
-            )
-            try:
-                await self._email.send(message)
-            except Exception:
-                # At-least-once redelivery, capped attempts (§3.6.2) — a
-                # send failure must never crash the batch or lose the
-                # row; it just becomes eligible for a later retry (or, at
-                # _MAX_ATTEMPTS, effectively a dead letter — see the
-                # outbox migration's docstring on why there's no separate
-                # DLQ table yet).
-                await self._outbox.record_attempt_failure(entry.id)
-                failed += 1
-                log.error(
-                    "email_dispatch_failed",
-                    outbox_id=str(entry.id),
-                    attempts=entry.attempts + 1,
+            with linked_span("outbox.dispatch.email.send", entry.trace_context):
+                message = EmailMessage(
+                    to=entry.payload["to"],
+                    subject=entry.payload["subject"],
+                    text_body=entry.payload["text_body"],
                 )
-                continue
-            await self._outbox.mark_dispatched(entry.id, dispatched_at=self._clock.now())
-            dispatched += 1
+                try:
+                    await self._email.send(message)
+                except Exception:
+                    # At-least-once redelivery, capped attempts (§3.6.2) — a
+                    # send failure must never crash the batch or lose the
+                    # row; it just becomes eligible for a later retry (or, at
+                    # _MAX_ATTEMPTS, effectively a dead letter — see the
+                    # outbox migration's docstring on why there's no separate
+                    # DLQ table yet).
+                    await self._outbox.record_attempt_failure(entry.id)
+                    failed += 1
+                    log.error(
+                        "email_dispatch_failed",
+                        outbox_id=str(entry.id),
+                        attempts=entry.attempts + 1,
+                    )
+                    continue
+                await self._outbox.mark_dispatched(entry.id, dispatched_at=self._clock.now())
+                dispatched += 1
         return DispatchResult(dispatched=dispatched, failed=failed)

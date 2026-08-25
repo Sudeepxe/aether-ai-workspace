@@ -1,0 +1,32 @@
+# Prometheus config (S9, §10.4). Rule files live in ./rules/ (empty
+# scaffold here — issue #96 populates real alert rules on top of this
+# scrape config, which is already real and complete on its own).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: aether-api
+    static_configs:
+      - targets: ["api:8000"]
+    metrics_path: /metrics
+
+  - job_name: aether-worker
+    static_configs:
+      - targets: ["worker:9090"]
+
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8888"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

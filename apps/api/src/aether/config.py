@@ -126,6 +126,20 @@ class Settings(BaseSettings):
     # coexist is a per-(model, version) mapping, not a bigger constant.
     retrieval_refusal_threshold: float = 0.0082
 
+    # --- Observability (Sprint 9, NFR-O-1, §3.8) -------------------------
+    # Empty string = tracing stays a no-op (same "falls back to an honest
+    # local placeholder" posture as openai_api_key/resend_api_key above):
+    # dev/CI without the observability compose profile running just gets
+    # untraced spans, not import errors or a hung background exporter.
+    otel_exporter_otlp_endpoint: str = ""
+    otel_trace_sample_ratio: float = 0.10  # NFR-O-1: "sampled >= 10%"
+    # The worker has no HTTP server of its own (a poll-loop daemon, not
+    # a request handler) — prometheus_client's own tiny built-in server
+    # (a background thread) is the standard way to expose /metrics for a
+    # process shaped like this, same as any other Prometheus-instrumented
+    # batch/daemon job.
+    worker_metrics_port: int = 9090
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

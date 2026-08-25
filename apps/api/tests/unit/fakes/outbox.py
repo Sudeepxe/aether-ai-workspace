@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -46,29 +47,8 @@ class FakeOutboxRepository:
         return matches[:limit]
 
     async def mark_dispatched(self, entry_id: UUID, *, dispatched_at: datetime) -> None:
-        current = self._rows[entry_id]
-        self._rows[entry_id] = OutboxEntry(
-            id=current.id,
-            aggregate_type=current.aggregate_type,
-            aggregate_id=current.aggregate_id,
-            event_type=current.event_type,
-            tenant_id=current.tenant_id,
-            payload=current.payload,
-            attempts=current.attempts,
-            created_at=current.created_at,
-            dispatched_at=dispatched_at,
-        )
+        self._rows[entry_id] = replace(self._rows[entry_id], dispatched_at=dispatched_at)
 
     async def record_attempt_failure(self, entry_id: UUID) -> None:
         current = self._rows[entry_id]
-        self._rows[entry_id] = OutboxEntry(
-            id=current.id,
-            aggregate_type=current.aggregate_type,
-            aggregate_id=current.aggregate_id,
-            event_type=current.event_type,
-            tenant_id=current.tenant_id,
-            payload=current.payload,
-            attempts=current.attempts + 1,
-            created_at=current.created_at,
-            dispatched_at=current.dispatched_at,
-        )
+        self._rows[entry_id] = replace(current, attempts=current.attempts + 1)

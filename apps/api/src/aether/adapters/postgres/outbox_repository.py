@@ -28,7 +28,9 @@ from uuid import UUID
 
 import asyncpg
 
+from aether.observability.tracing import inject_trace_context
 from aether.ports.outbox import OutboxEntry
+from aether.ports.outbox_metrics import OutboxStats
 
 
 class PostgresOutboxRepository:
@@ -47,8 +49,8 @@ class PostgresOutboxRepository:
     ) -> None:
         await self._conn.execute(
             """
-            INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, tenant_id, payload)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, tenant_id, payload, trace_context)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,
             id,
             aggregate_type,
@@ -56,6 +58,7 @@ class PostgresOutboxRepository:
             event_type,
             tenant_id,
             payload,
+            inject_trace_context(),
         )
 
     async def enqueue_idempotent(
@@ -70,8 +73,8 @@ class PostgresOutboxRepository:
     ) -> None:
         await self._conn.execute(
             """
-            INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, tenant_id, payload)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, tenant_id, payload, trace_context)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (id) DO NOTHING
             """,
             id,
@@ -80,6 +83,7 @@ class PostgresOutboxRepository:
             event_type,
             tenant_id,
             payload,
+            inject_trace_context(),
         )
 
     async def fetch_pending(
@@ -88,7 +92,7 @@ class PostgresOutboxRepository:
         rows = await self._conn.fetch(
             """
             SELECT id, aggregate_type, aggregate_id, event_type, tenant_id, payload,
-                   attempts, created_at, dispatched_at
+                   attempts, created_at, dispatched_at, trace_context
             FROM outbox
             WHERE event_type = $1 AND dispatched_at IS NULL AND attempts < $2
             ORDER BY created_at
@@ -110,6 +114,33 @@ class PostgresOutboxRepository:
             "UPDATE outbox SET attempts = attempts + 1 WHERE id = $1", entry_id
         )
 
+    async def get_stats(self, *, event_type: str, max_attempts: int) -> OutboxStats:
+        """Not part of ``OutboxRepositoryPort`` — see
+        ``ports.outbox_metrics``'s docstring for why this lives as an
+        extra method on the concrete adapter instead of growing that
+        shared Protocol."""
+        row = await self._conn.fetchrow(
+            """
+            SELECT
+                EXTRACT(EPOCH FROM (now() - MIN(created_at) FILTER (
+                    WHERE dispatched_at IS NULL AND attempts < $2
+                ))) AS oldest_pending_seconds,
+                COUNT(*) FILTER (
+                    WHERE dispatched_at IS NULL AND attempts >= $2
+                ) AS dlq_depth
+            FROM outbox
+            WHERE event_type = $1
+            """,
+            event_type,
+            max_attempts,
+        )
+        assert row is not None  # noqa: S101 — COUNT/EXTRACT always return exactly one row
+        oldest = row["oldest_pending_seconds"]
+        return OutboxStats(
+            oldest_pending_seconds=float(oldest) if oldest is not None else None,
+            dlq_depth=row["dlq_depth"],
+        )
+
 
 def _row_to_entry(row: asyncpg.Record) -> OutboxEntry:
     return OutboxEntry(
@@ -122,4 +153,5 @@ def _row_to_entry(row: asyncpg.Record) -> OutboxEntry:
         attempts=row["attempts"],
         created_at=row["created_at"],
         dispatched_at=row["dispatched_at"],
+        trace_context=dict(row["trace_context"]),
     )

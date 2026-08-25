@@ -1,0 +1,50 @@
+# Grafana datasource provisioning (S9, §10.4) — "provisioned as code",
+# no click-ops. Trace<->log<->metric correlation wired here (not left
+# as a manual post-boot step): Tempo spans link to their Loki lines via
+# the correlation_id LogQL filter (see infra/promtail/config.yaml on why
+# it's a filter, not a label), and to their Prometheus metrics via
+# exemplars-style trace-id tagging on the same service/span name.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    uid: loki
+    jsonData:
+      derivedFields:
+        - datasourceUid: tempo
+          matcherRegex: '"correlation_id":"(\w+)"'
+          name: TraceID
+          url: "${__value.raw}"
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    uid: tempo
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        filterByTraceID: false
+        customQuery: true
+        query: '{container=~"aether-.*"} | json | correlation_id="${__span.traceId}"'
+      tracesToMetrics:
+        datasourceUid: prometheus
+        queries:
+          - name: "Request rate for this service"
+            query: 'sum(rate(aether_http_request_duration_seconds_count{route=~".+"}[5m]))'
+      serviceMap:
+        datasourceUid: prometheus
