@@ -8,29 +8,37 @@ refusal. Built end-to-end by one engineer as an architecture-first flagship:
 the AI features are one subsystem inside a real production application
 (auth, tenancy, budgets, audit, observability, DR) — not the whole app.
 
-> **Status: Sprint 8 — Memory, feedback, and provable deletion complete.**
-> Sprints 0–7 (factory; identity & forced row-level-security tenant
+> **Status: Sprint 9 — Observability, alerting, and chaos-lite complete.**
+> Sprints 0–8 (factory; identity & forced row-level-security tenant
 > isolation; workspace/membership/invitation CRUD, RBAC, audit logging,
 > email, rate limiting; the real-time streaming spine with cross-replica
 > resume/cancel; the LLM Router with usage/budget admission; the full
 > knowledge-base ingestion pipeline; grounded chat — hybrid retrieval,
 > RRF/MMR, dual-feed query rewrite, two-gate refusal, per-chunk citations,
 > citations/refusal UI; the real evaluation harness with a live 20-case
-> golden-set baseline) are merged to `main`. Sprint 8 completes the data-
-> lifecycle story (§1.5, FR-AD-5, DF-3): a token-budgeted thread-window +
-> rolling-compaction memory service with an honest window-only fallback on
-> compactor failure; message-level 👍/👎 feedback capture threaded onto
-> `GET .../messages`; a real async workspace-deletion saga (`202` + job
-> polling, outbox-driven worker purge, atomic hard-delete cascade across
-> every tenant-scoped table); a real tenant-data-export saga (JSON +
-> original files zipped, presigned download); and — the sprint's literal
-> exit criterion (§11.6) — an **independent** deletion-verification job
-> that re-checks residue across all 11 tenant-scoped tables plus real
-> object storage, never trusting the deletion saga's own self-report.
-> `test_FR_KB_5_deletion_cascades` passes for real against real
-> Postgres/MinIO, and a real stray-object scenario proves the verifier
-> actually detects residue rather than rubber-stamping. The one number
-> this project still does **not** claim: the North Star (§1.7, faithfulness
+> golden-set baseline; memory service + message feedback; async workspace
+> deletion/export sagas with independent deletion verification) are merged
+> to `main`. Sprint 9 makes the platform's own operation observable and
+> provably resilient (§3.8, §10.4/§10.5): real OpenTelemetry tracing (W3C
+> `traceparent` propagated API → outbox → queue → worker, one correlated
+> trace per user action, live-verified end-to-end through a real
+> otel-collector tail-sampling pipeline into Tempo) and Prometheus metrics
+> feeding five Grafana dashboards (SLO, AI-plane, Ingestion, Data-tier,
+> Cost) — provisioned as code, every panel querying a real metric with
+> honest notes where a signal genuinely isn't live yet, never faked; 11
+> Prometheus alert rules (10 page-grade + 1 ticket-grade) each wired to a
+> concretely-followable runbook, validated with real `promtool` synthetic
+> burn tests and live-verified by letting a real alert fire and land in a
+> real inbox; a chaos-lite suite proving three specific documented
+> degraded modes against real killed/restarted containers (Redis fail-open
+> rate-limiting/revocation, worker-kill-mid-ingest resume via real Redis
+> Streams redelivery, provider-mid-stream partial-response handling
+> through the real SSE surface); and k6 performance budgets enforcing
+> NFR-P-1/2/3 in CI, with two real bugs (a Go-map field-reordering upload
+> failure, a rate-limiter thundering herd) found and fixed by actually
+> running the load tests against a live stack rather than just authoring
+> them. The one number this project still does **not** claim: the North
+> Star (§1.7, faithfulness
 > ≥ 90% ∧ correct-refusal ≥ 90%) remains **not yet determinable** — it
 > needs a real cross-family LLM judge, and no OpenAI/Anthropic key is
 > provisioned in this environment. Every AI-facing component (chat
@@ -77,7 +85,12 @@ resume; a thin owned **LLM router** with fallback chains; and a CI-gated
 | Memory service (thread window + rolling compaction) + message feedback (👍/👎) | live (S8) |
 | Workspace deletion saga (DF-3, async `202`+job) + tenant data export (FR-AD-5) | live (S8) — real MinIO archive, real presigned download |
 | **`test_FR_KB_5_deletion_cascades` + independent deletion-verification job (NFR-PR-1, §11.6 exit criterion)** | **live, green** (S8) — real residue sweep across every tenant-scoped table + object storage, proven to genuinely detect a stray-object scenario, not a rubber stamp |
-| One-command demo | infra: `make dev` today · full demo profile: S9–S11 |
+| OpenTelemetry tracing + Prometheus metrics + LGTM stack (`make dev-observability`) | live (S9) — real correlated traces API→outbox→worker, live-verified end-to-end into Tempo |
+| 5 Grafana dashboards (SLO, AI-plane, Ingestion, Data-tier, Cost), provisioned as code | live (S9) — every panel a real metric; honest notes where a signal isn't live yet |
+| 11 Prometheus alert rules + runbooks + blameless postmortem template | live (S9) — `promtool` burn tests green in CI; a real alert live-verified firing end-to-end into a real inbox |
+| Chaos-lite suite (Redis kill, worker-kill-mid-ingest, provider-mid-stream) | live (S9) — 3 real degraded-mode experiments against real killed/restarted containers, opt-in nightly lane |
+| k6 performance budgets (NFR-P-1/2/3) in CI (`perf-smoke` + nightly) | live (S9) |
+| One-command demo | infra: `make dev` today · full demo profile: S10–S11 |
 
 ## Quickstart (Sprint 0 scope)
 
