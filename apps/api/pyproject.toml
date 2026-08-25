@@ -177,6 +177,7 @@ markers = [
   "contract: OpenAPI conformance (schemathesis)",
   "security: authz matrix / cross-tenant red team (enabled S1+)",
   "architecture: import-boundary and structural rules",
+  "chaos: infra-kill experiments against real containers (S9 #97) — slow, opt-in/nightly, not in the default PR lane",
 ]
 
 # ------------------------------------------------------------- coverage ----
