@@ -17,20 +17,45 @@ export function staggerVuStart() {
   sleep(__VU * 2);
 }
 
+// A single stagger delay isn't sufficient on its own — in real CI, one
+// script's AUTH-bucket consumption (register+login for every VU) may
+// not have fully refilled (continuous refill, 1 token/6s) by the time
+// the *next* script in the same job starts registering its own users
+// against the same IP-scoped bucket. Found empirically on the first
+// real CI run (a local run only ever exercised one script's registration
+// burst in isolation, never back-to-back scripts sharing one bucket).
+// The robust fix is retrying on a genuine 429 with real backoff — how
+// any real client should treat a rate-limited endpoint — not trying to
+// time everything perfectly in advance.
+function postWithRetry(url, body, params, checkLabel) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const res = http.post(url, body, params);
+    if (res.status !== 429) {
+      check(res, { [checkLabel]: (r) => r.status === 200 || r.status === 201 });
+      return res;
+    }
+    const retryAfter = Number(res.headers["Retry-After"]) || 6;
+    sleep(retryAfter);
+  }
+  throw new Error(`${checkLabel}: exhausted retries, still 429 after 5 attempts`);
+}
+
 export function registerAndLogin(emailPrefix) {
   const email = `${emailPrefix}-${__VU}-${Date.now()}@example.com`;
   const password = "s3cret!!";
-  http.post(
+  const jsonHeaders = { headers: { "Content-Type": "application/json" } };
+  postWithRetry(
     `${BASE_URL}/v1/auth/register`,
     JSON.stringify({ email: email, password: password, display_name: email }),
-    { headers: { "Content-Type": "application/json" } }
+    jsonHeaders,
+    "register succeeded"
   );
-  const loginRes = http.post(
+  const loginRes = postWithRetry(
     `${BASE_URL}/v1/auth/login`,
     JSON.stringify({ email: email, password: password }),
-    { headers: { "Content-Type": "application/json" } }
+    jsonHeaders,
+    "login succeeded"
   );
-  check(loginRes, { "login succeeded": (r) => r.status === 200 });
   return loginRes.json("access_token");
 }
 
