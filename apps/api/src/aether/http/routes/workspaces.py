@@ -38,6 +38,7 @@ from aether.http.deps import (
     get_new_workspace_connection,
     get_workspace_scope,
 )
+from aether.http.idempotency import IdempotencyAwareRoute, idempotency_guard
 from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
 from aether.http.schemas.workspaces import (
     CreateWorkspaceRequest,
@@ -49,7 +50,7 @@ from aether.http.schemas.workspaces import (
     WorkspaceResponse,
 )
 
-router = APIRouter(prefix="/v1", tags=["workspaces"])
+router = APIRouter(prefix="/v1", tags=["workspaces"], route_class=IdempotencyAwareRoute)
 
 
 def _etag(workspace: Workspace) -> str:
@@ -116,7 +117,10 @@ def _to_membership_response(membership: Membership) -> MembershipResponse:
     response_model=WorkspaceResponse,
     status_code=status.HTTP_201_CREATED,
     openapi_extra=route_auth(AuthRequirement.AUTHENTICATED),
-    dependencies=[Depends(rate_limit_by_user(RateLimitClass.CHEAP))],
+    dependencies=[
+        Depends(rate_limit_by_user(RateLimitClass.CHEAP)),
+        Depends(idempotency_guard),
+    ],
 )
 async def create_workspace(
     body: CreateWorkspaceRequest,

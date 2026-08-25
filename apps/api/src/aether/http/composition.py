@@ -56,6 +56,7 @@ from aether.adapters.postgres.user_repository import PostgresUserRepository
 from aether.adapters.postgres.workspace_repository import PostgresWorkspaceRepository
 from aether.adapters.redis.cancellation import RedisCancellationChannel
 from aether.adapters.redis.denylist import RedisJtiDenylist
+from aether.adapters.redis.idempotency import RedisIdempotencyStore
 from aether.adapters.redis.rate_limiter import (
     FailOpenRateLimiter,
     LocalTokenBucketRateLimiter,
@@ -112,6 +113,7 @@ from aether.config import Settings
 from aether.ports.audit import AuditLogPort
 from aether.ports.chat import GeneratorPort, MessageStorePort
 from aether.ports.embedding import EmbeddingProviderPort
+from aether.ports.idempotency import IdempotencyStorePort
 from aether.ports.llm import ProviderAdapterPort
 from aether.ports.memory import MemoryCompactionPort
 from aether.ports.metering import BudgetAdmissionPort, BudgetRepositoryPort, UsageLedgerPort
@@ -163,6 +165,10 @@ class Container:
     instance used for verify_api_key's global by-prefix lookup, which by
     definition runs before any tenant scope is known."""
     verify_api_key: VerifyApiKey
+    idempotency_store: IdempotencyStorePort
+    """Pool-bound (well, Redis-client-bound) singleton — ADR-4.6's
+    generic Idempotency-Key replay store, consumed by
+    http/idempotency.py's ``idempotency_guard``/``IdempotencyAwareRoute``."""
     password_reset_tokens: PasswordResetTokenRepositoryPort
     hasher: PasswordHasherPort
     tokens: TokenPort
@@ -469,6 +475,7 @@ async def build_container(settings: Settings) -> Container:
     clock = SystemClock()
     ids = Uuid7Generator()
     verify_api_key = VerifyApiKey(api_keys=api_keys, clock=clock)
+    idempotency_store = RedisIdempotencyStore(redis_client)
     revocations = RedisJtiDenylist(redis_client)
     rate_limiter = FailOpenRateLimiter(
         RedisTokenBucketRateLimiter(redis_client, clock=clock),
@@ -522,6 +529,7 @@ async def build_container(settings: Settings) -> Container:
         invitations=invitations,
         api_keys=api_keys,
         verify_api_key=verify_api_key,
+        idempotency_store=idempotency_store,
         password_reset_tokens=password_reset_tokens,
         hasher=hasher,
         tokens=tokens,

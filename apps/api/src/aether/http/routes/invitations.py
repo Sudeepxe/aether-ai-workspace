@@ -19,6 +19,7 @@ from aether.http.deps import (
     get_invitation_acceptance_scope,
     get_workspace_scope,
 )
+from aether.http.idempotency import IdempotencyAwareRoute, idempotency_guard
 from aether.http.rate_limit_deps import RateLimitClass, rate_limit_by_user
 from aether.http.schemas.workspaces import (
     CreateInvitationRequest,
@@ -26,7 +27,7 @@ from aether.http.schemas.workspaces import (
     MembershipResponse,
 )
 
-router = APIRouter(prefix="/v1", tags=["invitations"])
+router = APIRouter(prefix="/v1", tags=["invitations"], route_class=IdempotencyAwareRoute)
 
 
 def _to_invitation_response(invitation: Invitation) -> InvitationResponse:
@@ -56,7 +57,10 @@ def _to_membership_response(membership: Membership) -> MembershipResponse:
     response_model=InvitationResponse,
     status_code=status.HTTP_201_CREATED,
     openapi_extra=route_auth(AuthRequirement.WORKSPACE_MEMBER),
-    dependencies=[Depends(rate_limit_by_user(RateLimitClass.AUTH))],
+    dependencies=[
+        Depends(rate_limit_by_user(RateLimitClass.AUTH)),
+        Depends(idempotency_guard),
+    ],
 )
 async def create_invitation(
     workspace_id: UUID,

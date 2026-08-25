@@ -148,3 +148,11 @@ class InvalidApiKeyError(DomainError):
     distinguishing "wrong secret" from "revoked" from "expired" would let
     a caller probe for which of their leaked/guessed keys used to be
     valid."""
+
+
+class IdempotencyKeyConflictError(DomainError):
+    """A mutating POST reused an ``Idempotency-Key`` already seen for this
+    identity, but with a different request body (ADR-4.6) — a genuine
+    client bug (two logically different requests sharing one key), not a
+    legitimate retry. The original response is never applied to the new
+    body; the caller must retry with a fresh key."""
