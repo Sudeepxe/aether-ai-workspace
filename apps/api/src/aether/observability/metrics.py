@@ -99,6 +99,17 @@ SETTLED_COST_MICROCENTS_TOTAL = Counter(
     "Sum of actual settled cost from provider usage (the drift comparison's actual side)",
 )
 
+AUTH_REFRESH_REUSE_TOTAL = Counter(
+    "aether_auth_refresh_reuse_total",
+    "Refresh-token-reuse detections (§7.6) — a page-grade security alert (§10.4), should be ~0",
+)
+
+RLS_VIOLATION_TOTAL = Counter(
+    "aether_rls_violation_total",
+    "Genuine forced-RLS WITH CHECK rejections reaching the HTTP layer (§10.4) — a "
+    "security invariant violation, should be exactly 0 in normal operation",
+)
+
 
 def metrics_endpoint() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

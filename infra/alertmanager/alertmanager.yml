@@ -1,12 +1,29 @@
-# Alertmanager config (S9, §10.4) — scaffold only. A real receiver
-# (push notification + email per §10.4's solo-on-call framing) and the
-# page-grade/ticket-grade routing tree land in issue #96 alongside the
-# actual alert rules; this stub keeps the `observability` compose
-# profile bootable end-to-end (Prometheus needs a reachable
-# Alertmanager to start cleanly) without a real destination lying about
-# where pages go.
+# Alertmanager config (S9 #96, §10.4). Solo on-call reality: "page =
+# push notification + email" — email is wired for real here, against
+# mailpit (the same real-but-not-sent-to-a-real-inbox SMTP relay
+# already used for invitation/password-reset email since S2, `dev`
+# compose profile). Push notification needs a real external service +
+# credentials (ntfy.sh/Pushover/PagerDuty) this environment doesn't
+# have — same honest-gap class as the LLM provider keys: the receiver
+# slot is real and wired, a real push integration is a documented
+# follow-up, not faked with a dummy webhook that would silently no-op.
 route:
-  receiver: null-receiver
+  receiver: aether-oncall
+  group_by: ["alertname"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - match:
+        severity: ticket
+      receiver: aether-oncall
+      repeat_interval: 24h
 
 receivers:
-  - name: null-receiver
+  - name: aether-oncall
+    email_configs:
+      - to: oncall@aether.local
+        from: alertmanager@aether.local
+        smarthost: mailpit:1025
+        require_tls: false
+        send_resolved: true

@@ -56,6 +56,16 @@ jobs:
         env:
           PYTHONPATH: ../..
         run: uv run mypy --strict --ignore-missing-imports --explicit-package-bases ../../evals
+      - name: Prometheus alert rules — syntax + synthetic burn tests (S9 #96, §10.6)
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "${{ github.workspace }}/infra/prometheus/rules:/rules:ro" -w /rules \
+            prom/prometheus:v2.55.1@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3 \
+            check rules aether.yml
+          docker run --rm --entrypoint promtool \
+            -v "${{ github.workspace }}/infra/prometheus:/prometheus:ro" -w /prometheus/tests \
+            prom/prometheus:v2.55.1@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3 \
+            test rules aether_test.yml
 
   unit:
     runs-on: ubuntu-latest

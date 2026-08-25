@@ -28,6 +28,7 @@ from uuid import UUID
 
 from aether.app.auth.tokens import hash_refresh_token
 from aether.domain.errors import InvalidRefreshTokenError, RefreshTokenReusedError
+from aether.observability.metrics import AUTH_REFRESH_REUSE_TOTAL
 from aether.ports.repositories import RefreshTokenRepositoryPort
 from aether.ports.security import ClockPort, IdPort, TokenPort
 
@@ -105,4 +106,5 @@ class RefreshSession:
         # Reuse outside the grace window, or from a different device:
         # treat the family as compromised.
         await self._refresh_tokens.revoke_family(token.family_id, revoked_at=now)
+        AUTH_REFRESH_REUSE_TOTAL.inc()
         raise RefreshTokenReusedError

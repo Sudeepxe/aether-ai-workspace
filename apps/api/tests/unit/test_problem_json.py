@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from aether.http.authz import AuthRequirement, route_auth
 from aether.http.problem_json import install_error_handlers
+from aether.observability.metrics import RLS_VIOLATION_TOTAL
 
 pytestmark = pytest.mark.unit
 
@@ -74,3 +75,58 @@ def test_unhandled_exception_returns_500_with_no_leaked_internals() -> None:
     assert _REQUIRED_FIELDS <= body.keys()
     assert body["code"] == "internal_server_error"
     assert "super secret internal detail" not in resp.text
+
+
+class _FakePostgresError(Exception):
+    """Duck-types asyncpg's PostgresError shape (a ``sqlstate``
+    attribute) without depending on the real class — the handler's own
+    check is deliberately duck-typed (``getattr(exc, "sqlstate", None)``),
+    so this is a faithful, dependency-free way to exercise it."""
+
+    def __init__(self, message: str, *, sqlstate: str) -> None:
+        super().__init__(message)
+        self.sqlstate = sqlstate
+
+
+def _boom_app(exc: Exception) -> TestClient:
+    app = FastAPI()
+
+    @app.get("/boom", openapi_extra=route_auth(AuthRequirement.PUBLIC))
+    async def boom() -> None:
+        raise exc
+
+    install_error_handlers(app, error_status={})
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_a_real_rls_policy_rejection_increments_the_violation_counter() -> None:
+    """S9 #96's page-grade RLSViolationDetected alert has a real
+    detection point behind it, not just a rule that can never fire —
+    NFR-O-1's own bar of "provably real", not just plausible-looking."""
+    before = RLS_VIOLATION_TOTAL._value.get()
+    client = _boom_app(
+        _FakePostgresError(
+            'new row violates row-level security policy for table "threads"', sqlstate="42501"
+        )
+    )
+
+    resp = client.get("/boom")
+
+    assert resp.status_code == 500
+    assert RLS_VIOLATION_TOTAL._value.get() == before + 1
+
+
+def test_an_unrelated_insufficient_privilege_error_does_not_increment_the_counter() -> None:
+    """Same SQLSTATE class (42501) but a different failure — an
+    ordinary missing-grant bug, not an RLS policy rejection — must NOT
+    count as a security-alert-worthy event (see the handler's own
+    comment on why the message substring check exists)."""
+    before = RLS_VIOLATION_TOTAL._value.get()
+    client = _boom_app(
+        _FakePostgresError('permission denied for table "budgets"', sqlstate="42501")
+    )
+
+    resp = client.get("/boom")
+
+    assert resp.status_code == 500
+    assert RLS_VIOLATION_TOTAL._value.get() == before  # unchanged

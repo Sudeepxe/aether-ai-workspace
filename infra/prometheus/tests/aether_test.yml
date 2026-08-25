@@ -1,0 +1,111 @@
+# promtool rule-unit tests (S9 #96's "alert burn-tests pass" exit
+# criterion, §10.6): synthetic time series prove the alert expressions
+# actually fire under the conditions they claim to detect — not "we
+# wrote PromQL that looks right", a real evaluation against a
+# deterministic input series. Run: `promtool test rules
+# infra/prometheus/tests/aether_test.yml` (wired into CI in this PR).
+#
+# Deliberately NOT in infra/prometheus/rules/ alongside aether.yml:
+# that directory is bind-mounted straight into the Prometheus
+# container (prometheus.yml's `rule_files: - /etc/prometheus/rules/*.yml`
+# glob) — a promtool *test* file there would itself get parsed as a
+# rule file and fail Prometheus's config validation on boot (this
+# exact failure was caught by actually booting the compose stack, not
+# just running promtool standalone).
+rule_files:
+  - ../rules/aether.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="aether-api"}'
+        # Up for 5 intervals, then down for the rest of the 10-minute
+        # window — proves APIDown fires once the 2m `for:` is satisfied
+        # and not a moment before.
+        values: "1x5 0x10"
+
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: APIDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: APIDown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: APIDown
+        exp_alerts:
+          - exp_labels:
+              job: aether-api
+              severity: page
+            exp_annotations:
+              summary: "The API is not responding to Prometheus scrapes"
+              runbook_url: "docs/runbooks/api-down.md"
+
+  - interval: 1m
+    input_series:
+      # Spend climbs from 0 to 96% of a fixed 100-unit cap over 10
+      # minutes — crosses the 90% GlobalBudgetNearCap threshold at t=9m
+      # and stays there, proving the alert fires once `for: 5m` is
+      # satisfied (t=14m), not on the instant the ratio first crosses.
+      - series: 'aether_global_spend_microcents{job="aether-worker"}'
+        values: "0 10 20 30 40 50 60 70 80 90 91 92 93 94 95 96"
+      - series: 'aether_global_budget_cap_microcents{job="aether-worker"}'
+        values: "100x16"
+
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: GlobalBudgetNearCap
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: GlobalBudgetNearCap
+        exp_alerts:
+          - exp_labels:
+              job: aether-worker
+              severity: page
+            exp_annotations:
+              summary: "Global monthly spend has reached 90% of the hard cap (NFR-C-1)"
+              runbook_url: "docs/runbooks/global-budget-near-cap.md"
+
+  - interval: 1m
+    input_series:
+      # A single refresh-reuse detection at t=2m — AuthRefreshReuseDetected
+      # has for:0m, so it must fire on the very next evaluation.
+      - series: "aether_auth_refresh_reuse_total"
+        values: "0 0 1 1 1 1 1 1"
+
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: AuthRefreshReuseDetected
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: AuthRefreshReuseDetected
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: "A refresh-token-reuse (theft signal, §7.6) was detected"
+              runbook_url: "docs/runbooks/refresh-reuse-detected.md"
+
+  - interval: 1m
+    input_series:
+      # An outbox row stuck undispatched: lag climbs past 300s and stays
+      # there — OutboxLagHigh (for: 5m) must fire once sustained, not on
+      # the instant it first crosses 300.
+      - series: 'aether_outbox_lag_seconds{event_type="email.send"}'
+        values: "0 60 120 180 240 300 360 420 480 540 600 600 600"
+
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: OutboxLagHigh
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: OutboxLagHigh
+        exp_alerts:
+          - exp_labels:
+              event_type: email.send
+              severity: page
+            exp_annotations:
+              summary: "Outbox (email.send) has an undispatched row older than 5 minutes"
+              runbook_url: "docs/runbooks/outbox-lag-high.md"
