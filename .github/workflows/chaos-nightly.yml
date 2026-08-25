@@ -1,0 +1,30 @@
+# Nightly chaos-lite suite (S9 #97, blueprint §10.5's chaos-lite row) —
+# real infra-kill experiments (docker kill/start on real containers,
+# real Redis Streams consumer-group redelivery, a real SSE round trip
+# with an injected mid-stream provider failure), each asserting one
+# specific documented degraded behavior (§3.2.12, SD-1). Deliberately
+# NOT in ci.yml's PR lane: these are slow (real container kills +
+# restarts + readiness waits) and infra-heavy — an opt-in/nightly lane,
+# same posture as eval-nightly.yml.
+
+name: chaos-nightly
+
+on:
+  schedule:
+    - cron: "43 7 * * *" # 07:43 UTC daily — offset from eval-nightly's :17 to avoid both competing for the same runner minute
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  chaos-lite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - name: Run the chaos-lite suite (real Postgres/Redis/MinIO/ClamAV via testcontainers)
+        working-directory: apps/api
+        run: |
+          uv sync
+          uv run pytest -m chaos -v
