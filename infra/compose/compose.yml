@@ -1,9 +1,12 @@
 # Aether compose topology (Blueprint §3.9.1). Profiles:
 #   dev  — infra services for local development (functional in Sprint 0)
 #   app  — api/worker containers built from source (functional from S1)
-#   demo/test — declared in SPRINT_0_PLAN §14; land S9–S11.
+#   observability — LGTM stack: otel-collector, tempo, loki, promtail,
+#                   prometheus, alertmanager, grafana (functional S9, §3.8)
+#   demo/test — declared in SPRINT_0_PLAN §14; land S10–S11.
 # Images pinned by digest, in `image:tag@digest` form (Ch. 10 F-1
-# discipline: no `latest`, no mutable tags). Digests captured 2026-08-14.
+# discipline: no `latest`, no mutable tags). Digests captured 2026-08-14
+# (dev/app services) and 2026-08-25 (observability services).
 name: aether
 
 services:
@@ -127,6 +130,7 @@ services:
       AETHER_OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-aether-dev-only}
       AETHER_CLAMAV_HOST: clamav
       AETHER_CLAMAV_PORT: "3310"
+    ports: ["9090:9090"]  # prometheus_client's built-in /metrics server (S9)
     depends_on:
       postgres: { condition: service_healthy }
       mailpit: { condition: service_healthy }
@@ -134,6 +138,81 @@ services:
       minio: { condition: service_healthy }
       clamav: { condition: service_healthy }
 
+  # --- observability profile (S9, §3.8's LGTM stack) ----------------------
+  # `docker compose --profile app --profile observability up` — separate
+  # from `app` so `make dev`'s inner-loop stays light by default; opt in
+  # when you actually want traces/dashboards. Set
+  # AETHER_OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 (api/worker's
+  # own env, outside this file — same "empty = off" posture as
+  # AETHER_OPENAI_API_KEY) to start exporting once this profile is up.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.1@sha256:d2da12c4336a79758826700be9e21ecf4a9f7d945b7f8a58ba55ee3fa45427c8
+    profiles: ["observability"]
+    command: ["--config=/etc/otel-collector/config.yaml"]
+    volumes: ["../otel-collector/config.yaml:/etc/otel-collector/config.yaml:ro"]
+    ports: ["4317:4317", "4318:4318"]
+    depends_on: [tempo]
+
+  tempo:
+    image: grafana/tempo:2.6.1@sha256:ef4384fce6e8ad22b95b243d8fc165628cda655376fd50e7850536ad89d71d50
+    profiles: ["observability"]
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    volumes: ["../tempo/config.yaml:/etc/tempo/config.yaml:ro", "tempo_data:/var/tempo"]
+    ports: ["3200:3200"]
+
+  loki:
+    image: grafana/loki:3.3.2@sha256:8af2de1abbdd7aa92b27c9bcc96f0f4140c9096b507c77921ffddf1c6ad6c48f
+    profiles: ["observability"]
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes: ["../loki/config.yaml:/etc/loki/config.yaml:ro", "loki_data:/loki"]
+    ports: ["3100:3100"]
+
+  promtail:
+    image: grafana/promtail:3.3.2@sha256:cb4990801ec58975c5e231057c2bcf204c85fac428eec65ad66e0016c64b9608
+    profiles: ["observability"]
+    command: ["-config.file=/etc/promtail/config.yaml"]
+    volumes:
+      - "../promtail/config.yaml:/etc/promtail/config.yaml:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    depends_on: [loki]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3
+    profiles: ["observability"]
+    volumes:
+      - "../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - "../prometheus/rules:/etc/prometheus/rules:ro"
+      - prometheus_data:/prometheus
+    ports: ["9091:9090"]  # host 9090 stays worker's own /metrics port
+    depends_on: [alertmanager]
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0@sha256:e13b6ed5cb929eeaee733479dce55e10eb3bc2e9c4586c705a4e8da41e5eacf5
+    profiles: ["observability"]
+    volumes: ["../alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro"]
+    ports: ["9093:9093"]
+
+  grafana:
+    image: grafana/grafana:11.3.1@sha256:fa801ab6e1ae035135309580891e09f7eb94d1abdbd2106bdc288030b028158c
+    profiles: ["observability"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"  # dev-only convenience (D10-1's demo posture); revisit before any real prod use
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      # Two independent top-level mounts, not one nested inside the
+      # other — mounting dashboards *under* the read-only provisioning
+      # mount fails ("read-only file system") since Docker can't create
+      # a new mountpoint inside an already-mounted read-only tree.
+      - "../grafana/provisioning:/etc/grafana/provisioning:ro"
+      - "../grafana/dashboards:/etc/grafana/dashboards:ro"
+      - grafana_data:/var/lib/grafana
+    ports: ["3000:3000"]
+    depends_on: [prometheus, loki, tempo]
+
 volumes:
   pg_data:
   minio_data:
+  tempo_data:
+  loki_data:
+  prometheus_data:
+  grafana_data:

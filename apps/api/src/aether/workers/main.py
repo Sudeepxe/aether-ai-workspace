@@ -25,20 +25,56 @@ import asyncio
 import signal
 from types import FrameType
 
+from prometheus_client import start_http_server
+
 from aether.app.ingestion.consume_queue import run_ingestion_consumer
 from aether.config import get_settings
 from aether.logging import configure_logging, get_logger
+from aether.observability.metrics import OUTBOX_DLQ_DEPTH, OUTBOX_LAG_SECONDS
+from aether.observability.tracing import configure_tracing, instrument_libraries
+from aether.ports.outbox_metrics import OutboxMetricsPort
 from aether.workers.composition import build_worker_container
 
 log = get_logger(__name__)
 
 _POLL_INTERVAL_SECONDS = 5.0
 _CONSUMER_SHUTDOWN_TIMEOUT_SECONDS = 30.0
+# The four outbox-driven event types this worker dispatches (mirrors the
+# poll loop below) — the deletion-verification sweep is deliberately
+# excluded, since it isn't outbox-driven (see this module's own
+# docstring) and so has no "pending" notion these gauges apply to.
+_TRACKED_EVENT_TYPES = (
+    "email.send",
+    "document.uploaded",
+    "workspace.delete_requested",
+    "workspace.export_requested",
+)
+_MAX_DISPATCH_ATTEMPTS = 5
+
+
+async def _record_outbox_gauges(outbox_metrics: OutboxMetricsPort) -> None:
+    for event_type in _TRACKED_EVENT_TYPES:
+        stats = await outbox_metrics.get_stats(
+            event_type=event_type, max_attempts=_MAX_DISPATCH_ATTEMPTS
+        )
+        if stats.oldest_pending_seconds is not None:
+            OUTBOX_LAG_SECONDS.labels(event_type=event_type).set(stats.oldest_pending_seconds)
+        else:
+            OUTBOX_LAG_SECONDS.labels(event_type=event_type).set(0)
+        OUTBOX_DLQ_DEPTH.labels(event_type=event_type).set(stats.dlq_depth)
 
 
 async def _run_async() -> None:
     settings = get_settings()
     configure_logging(level=settings.log_level, service_name="aether-worker")
+    configure_tracing(
+        service_name="aether-worker",
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+        sample_ratio=settings.otel_trace_sample_ratio,
+        environment=settings.env,
+    )
+    instrument_libraries()
+    start_http_server(settings.worker_metrics_port)
     container = await build_worker_container(settings)
 
     stop = asyncio.Event()
@@ -93,6 +129,7 @@ async def _run_async() -> None:
                     passed=verification_result.passed,
                     failed=verification_result.failed,
                 )
+            await _record_outbox_gauges(container.outbox_metrics)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=_POLL_INTERVAL_SECONDS)
             except TimeoutError:

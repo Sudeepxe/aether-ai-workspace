@@ -1,0 +1,13 @@
+# Grafana dashboard-provider config (S9). Points at infra/grafana/dashboards/
+# — empty in this issue (#94); the five dashboards (SLO overview, AI
+# plane, Ingestion, Data tier, Cost) are issue #95's scope, dropped as
+# JSON files into that directory with no further wiring needed here.
+apiVersion: 1
+
+providers:
+  - name: aether
+    folder: Aether
+    type: file
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

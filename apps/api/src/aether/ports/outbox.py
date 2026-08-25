@@ -3,7 +3,7 @@ docstring for the full design rationale."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
@@ -20,6 +20,11 @@ class OutboxEntry:
     attempts: int
     created_at: datetime
     dispatched_at: datetime | None
+    trace_context: dict[str, str] = field(default_factory=dict)
+    """Captured W3C ``traceparent`` (S9, NFR-O-1) from whoever called
+    ``enqueue`` — lets a worker dispatcher resume the same trace via
+    ``observability.tracing.linked_span``. Defaulted (not every producer
+    path — e.g. a hand-built test entry — needs to think about tracing)."""
 
 
 class OutboxRepositoryPort(Protocol):

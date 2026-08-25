@@ -8,7 +8,7 @@ API_DIR := apps/api
 WEB_DIR := apps/web
 COMPOSE := docker compose -f infra/compose/compose.yml
 
-.PHONY: help bootstrap dev down lint typecheck test build clean env-check secrets-edit secrets-env minio-setup
+.PHONY: help bootstrap dev dev-observability down down-observability lint typecheck test build clean env-check secrets-edit secrets-env minio-setup
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -32,6 +32,13 @@ dev: ## Start dev infra services (PG, Redis, MinIO, mailpit)
 
 down: ## Stop dev infra
 	$(COMPOSE) --profile dev down
+
+dev-observability: ## Start the LGTM stack (Prometheus/Loki/Tempo/Grafana + otel-collector + Alertmanager, S9 §3.8)
+	$(COMPOSE) --profile observability up -d --wait
+	@echo "grafana: http://localhost:3000 (anonymous admin, dev-only) — set AETHER_OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 to start exporting traces"
+
+down-observability: ## Stop the LGTM stack
+	$(COMPOSE) --profile observability down
 
 minio-setup: ## Idempotently ensure the dev document-storage bucket exists (S5, ADR-3.8)
 	cd $(API_DIR) && uv run python -c "\

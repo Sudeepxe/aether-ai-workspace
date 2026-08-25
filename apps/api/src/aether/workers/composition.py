@@ -46,6 +46,7 @@ from aether.ports.ingestion_queue import IngestionQueuePort
 from aether.ports.ingestion_repository import IngestionRepositoryPort
 from aether.ports.malware_scan import MalwareScanPort
 from aether.ports.outbox import OutboxRepositoryPort
+from aether.ports.outbox_metrics import OutboxMetricsPort
 from aether.ports.security import ClockPort, IdPort
 from aether.ports.storage import ObjectStoragePort
 from aether.ports.workspace_deletion import WorkspaceDeletionPort
@@ -65,6 +66,10 @@ class WorkerContainer:
     db_pool: asyncpg.Pool
     redis_client: redis_asyncio.Redis
     outbox: OutboxRepositoryPort
+    outbox_metrics: OutboxMetricsPort
+    """The same ``PostgresOutboxRepository`` instance as ``outbox``,
+    narrowed to a purpose-built read-only stats port (S9, §10.4) — see
+    ``ports.outbox_metrics``'s docstring."""
     email: EmailPort
     clock: ClockPort
     ingestion_queue: IngestionQueuePort
@@ -144,6 +149,7 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
         db_pool=db_pool,
         redis_client=redis_client,
         outbox=outbox,
+        outbox_metrics=outbox,
         email=email,
         clock=clock,
         ingestion_queue=ingestion_queue,

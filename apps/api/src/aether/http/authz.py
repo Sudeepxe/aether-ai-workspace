@@ -31,7 +31,7 @@ from starlette.routing import BaseRoute
 from aether.domain.entities import MembershipRole
 from aether.domain.policy import Capability, role_may
 
-_EXEMPT_PATHS = frozenset({"/healthz", "/readyz", "/openapi.json", "/docs", "/redoc"})
+_EXEMPT_PATHS = frozenset({"/healthz", "/readyz", "/metrics", "/openapi.json", "/docs", "/redoc"})
 _EXTRA_KEY = "x-auth-requirement"
 
 

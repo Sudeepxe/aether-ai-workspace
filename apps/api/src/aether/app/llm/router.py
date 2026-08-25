@@ -15,11 +15,16 @@ loop below for the exact rule.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 
 from aether.app.llm.circuit_breaker import CircuitBreaker
 from aether.domain.entities import Message, MessageRole
 from aether.domain.errors import NoProviderAvailableError
+from aether.observability.metrics import (
+    LLM_PROVIDER_FALLBACK_TOTAL,
+    LLM_PROVIDER_REQUEST_DURATION_SECONDS,
+)
 from aether.ports.chat import GenerationUsage, GeneratorChunk, RetrievedContext
 from aether.ports.llm import (
     CompletionRequest,
@@ -106,6 +111,9 @@ class LlmRouter:
         for provider_name, model in self._model_chain:
             breaker = self._breakers[provider_name]
             if breaker.is_open():
+                LLM_PROVIDER_FALLBACK_TOTAL.labels(
+                    provider=provider_name, reason="circuit_open"
+                ).inc()
                 continue
             provider = self._providers[provider_name]
             request = CompletionRequest(messages=messages, model=model, max_tokens=self._max_tokens)
@@ -118,6 +126,7 @@ class LlmRouter:
             # already-delivered output.
             responded = False
             text_sent = False
+            call_started = time.perf_counter()
             try:
                 # Held for the whole streaming duration, not just the
                 # call's start — bounds concurrent in-flight generations
@@ -127,6 +136,9 @@ class LlmRouter:
                         if not responded:
                             breaker.record_success()
                             responded = True
+                            LLM_PROVIDER_REQUEST_DURATION_SECONDS.labels(
+                                provider=provider_name, model=model, outcome="success"
+                            ).observe(time.perf_counter() - call_started)
                         if isinstance(chunk, ProviderUsage):
                             capability = self._capabilities[(provider_name, model)]
                             yield GenerationUsage(
@@ -150,6 +162,7 @@ class LlmRouter:
                 last_error = exc
                 if not exc.retryable:
                     raise NoProviderAvailableError(str(exc)) from exc
+                LLM_PROVIDER_FALLBACK_TOTAL.labels(provider=provider_name, reason="error").inc()
                 continue
 
         raise NoProviderAvailableError(

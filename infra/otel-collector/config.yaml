@@ -1,0 +1,57 @@
+# otel-collector config (S9, NFR-O-1): the tail-sampling half of "traces
+# sampled >= 10%, 100% on error" — a head sampler (the SDK's own
+# ParentBased(TraceIdRatioBased), see observability/tracing.py) decides
+# *before* a request's outcome is known, so it alone cannot implement
+# "100% on error". This collector buffers each trace's spans briefly,
+# then applies a real decision: any trace containing an ERROR-status
+# span is kept in full, everything else is kept at the configured
+# baseline rate — the two sampling layers compose, they don't conflict
+# (the head sampler's 10% already-dropped traces never reach here; this
+# layer's job is only to rescue error traces the head sampler would
+# otherwise have dropped, plus thin the survivors further if needed).
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  tail_sampling:
+    decision_wait: 10s
+    policies:
+      - name: errors-always-sampled
+        type: status_code
+        status_code: { status_codes: [ERROR] }
+      - name: baseline-rate
+        type: probabilistic
+        probabilistic: { sampling_percentage: 10 }
+  batch:
+    timeout: 5s
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [tail_sampling, batch]
+      exporters: [otlp/tempo]
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888

@@ -28,6 +28,7 @@ from uuid import UUID
 import structlog
 
 from aether.domain.entities import DeletionJobStatus
+from aether.observability.tracing import linked_span
 from aether.ports.outbox import OutboxRepositoryPort
 from aether.ports.security import ClockPort, IdPort
 from aether.ports.storage import ObjectStoragePort
@@ -72,20 +73,21 @@ class DispatchWorkspaceDeletion:
         for entry in entries:
             assert entry.tenant_id is not None  # noqa: S101 — invariant of this event type
             job_id = UUID(entry.payload["deletion_job_id"])
-            try:
-                await self._purge_one(workspace_id=entry.tenant_id, job_id=job_id)
-            except Exception:
-                await self._outbox.record_attempt_failure(entry.id)
-                failed += 1
-                log.error(
-                    "workspace_deletion_failed",
-                    outbox_id=str(entry.id),
-                    deletion_job_id=str(job_id),
-                    attempts=entry.attempts + 1,
-                )
-                continue
-            await self._outbox.mark_dispatched(entry.id, dispatched_at=self._clock.now())
-            dispatched += 1
+            with linked_span("outbox.dispatch.workspace.delete_requested", entry.trace_context):
+                try:
+                    await self._purge_one(workspace_id=entry.tenant_id, job_id=job_id)
+                except Exception:
+                    await self._outbox.record_attempt_failure(entry.id)
+                    failed += 1
+                    log.error(
+                        "workspace_deletion_failed",
+                        outbox_id=str(entry.id),
+                        deletion_job_id=str(job_id),
+                        attempts=entry.attempts + 1,
+                    )
+                    continue
+                await self._outbox.mark_dispatched(entry.id, dispatched_at=self._clock.now())
+                dispatched += 1
         return DispatchResult(dispatched=dispatched, failed=failed)
 
     async def _purge_one(self, *, workspace_id: UUID, job_id: UUID) -> None:
