@@ -8,8 +8,8 @@ refusal. Built end-to-end by one engineer as an architecture-first flagship:
 the AI features are one subsystem inside a real production application
 (auth, tenancy, budgets, audit, observability, DR) — not the whole app.
 
-> **Status: Sprint 9 — Observability, alerting, and chaos-lite complete.**
-> Sprints 0–8 (factory; identity & forced row-level-security tenant
+> **Status: Sprint 10 — Security hardening & API polish complete.**
+> Sprints 0–9 (factory; identity & forced row-level-security tenant
 > isolation; workspace/membership/invitation CRUD, RBAC, audit logging,
 > email, rate limiting; the real-time streaming spine with cross-replica
 > resume/cancel; the LLM Router with usage/budget admission; the full
@@ -17,36 +17,44 @@ the AI features are one subsystem inside a real production application
 > RRF/MMR, dual-feed query rewrite, two-gate refusal, per-chunk citations,
 > citations/refusal UI; the real evaluation harness with a live 20-case
 > golden-set baseline; memory service + message feedback; async workspace
-> deletion/export sagas with independent deletion verification) are merged
-> to `main`. Sprint 9 makes the platform's own operation observable and
-> provably resilient (§3.8, §10.4/§10.5): real OpenTelemetry tracing (W3C
-> `traceparent` propagated API → outbox → queue → worker, one correlated
-> trace per user action, live-verified end-to-end through a real
-> otel-collector tail-sampling pipeline into Tempo) and Prometheus metrics
-> feeding five Grafana dashboards (SLO, AI-plane, Ingestion, Data-tier,
-> Cost) — provisioned as code, every panel querying a real metric with
-> honest notes where a signal genuinely isn't live yet, never faked; 11
-> Prometheus alert rules (10 page-grade + 1 ticket-grade) each wired to a
-> concretely-followable runbook, validated with real `promtool` synthetic
-> burn tests and live-verified by letting a real alert fire and land in a
-> real inbox; a chaos-lite suite proving three specific documented
-> degraded modes against real killed/restarted containers (Redis fail-open
-> rate-limiting/revocation, worker-kill-mid-ingest resume via real Redis
-> Streams redelivery, provider-mid-stream partial-response handling
-> through the real SSE surface); and k6 performance budgets enforcing
-> NFR-P-1/2/3 in CI, with two real bugs (a Go-map field-reordering upload
-> failure, a rate-limiter thundering herd) found and fixed by actually
-> running the load tests against a live stack rather than just authoring
-> them. The one number this project still does **not** claim: the North
-> Star (§1.7, faithfulness
-> ≥ 90% ∧ correct-refusal ≥ 90%) remains **not yet determinable** — it
-> needs a real cross-family LLM judge, and no OpenAI/Anthropic key is
-> provisioned in this environment. Every AI-facing component (chat
-> generator, embedding call, query rewrite, memory compaction) likewise
-> falls back to honest, clearly-labeled local placeholders in dev/CI — real
-> providers activate automatically the moment the corresponding API key is
-> set, no code change required. This README is honest about state: no fake
-> badges, no aspirational numbers.
+> deletion/export sagas with independent deletion verification; real
+> OpenTelemetry tracing + Prometheus/Grafana + alerting + chaos-lite + k6
+> budgets) are merged to `main`. Sprint 10 closes the last MVP-committed
+> API-surface gap and adds the security-hardening lane the blueprint
+> promised but hadn't built yet: workspace-scoped, hashed, explicitly-
+> scoped **API keys** (FR-API-2, §7.4) authenticating the chat surface
+> alongside JWT sessions behind one unified authorization model; a generic
+> **`Idempotency-Key`** replay mechanism (ADR-4.6) for plain mutating
+> POSTs, reusing existing Redis infra; **OpenAPI publishing** — the spec
+> is a real generated-and-diffed artifact (`packages/contracts/openapi.json`)
+> with a `schemathesis`-driven contract-conformance CI gate, not aspirational
+> documentation; an **OWASP ZAP baseline DAST scan** wired into CI against
+> the real running API (two real header-hardening gaps it found are now
+> fixed, not just allowlisted); a **secrets-rotation drill** covering all
+> three secret classes this system has (SOPS/age recipient, provider API
+> key, JWT signing key via a real kid-overlap mechanism), the SOPS/age half
+> proven by a real add-then-remove rotation script that runs in CI on every
+> PR; and the **Devon-persona quickstart** (§11.6's exit criterion) — a
+> real external integrator's cold-start path, CI-verified end-to-end on a
+> weekly schedule, confirmed green on a real run against `main`
+> (register → real document ingestion → API-key-only grounded chat
+> completion in ~6.5s). Several genuine bugs were found and fixed by
+> actually running things rather than assuming: an asyncpg parameter-type-
+> inference bug in the API-key last-used-timestamp coarsening SQL; a real
+> functional bug where the chat rate limiter still hard-required a JWT
+> even after the auth layer became API-key-aware; a `schemathesis`
+> dependency pin that silently forced a CVE-carrying `starlette` downgrade
+> across the whole dependency tree, caught by CI's own `pip-audit` gate;
+> and a `sops` config-discovery quirk that broke the rotation drill's own
+> first draft. The one number this project still does **not** claim: the
+> North Star (§1.7, faithfulness ≥ 90% ∧ correct-refusal ≥ 90%) remains
+> **not yet determinable** — it needs a real cross-family LLM judge, and
+> no OpenAI/Anthropic key is provisioned in this environment. Every
+> AI-facing component (chat generator, embedding call, query rewrite,
+> memory compaction) likewise falls back to honest, clearly-labeled local
+> placeholders in dev/CI — real providers activate automatically the
+> moment the corresponding API key is set, no code change required. This
+> README is honest about state: no fake badges, no aspirational numbers.
 >
 > **Branch protection note:** required status checks on `main` are enforced
 > manually (every merge verifies all CI jobs green before squashing) rather
@@ -90,7 +98,13 @@ resume; a thin owned **LLM router** with fallback chains; and a CI-gated
 | 11 Prometheus alert rules + runbooks + blameless postmortem template | live (S9) — `promtool` burn tests green in CI; a real alert live-verified firing end-to-end into a real inbox |
 | Chaos-lite suite (Redis kill, worker-kill-mid-ingest, provider-mid-stream) | live (S9) — 3 real degraded-mode experiments against real killed/restarted containers, opt-in nightly lane |
 | k6 performance budgets (NFR-P-1/2/3) in CI (`perf-smoke` + nightly) | live (S9) |
-| One-command demo | infra: `make dev` today · full demo profile: S10–S11 |
+| API keys (FR-API-2, §7.4) — hashed, workspace-scoped, explicitly-scoped, authenticating chat alongside JWT | live (S10) — real HTTP round trip: API key alone authenticates, wrong-scope 403s, revoked 401s, cross-workspace 404s |
+| Generic `Idempotency-Key` support (ADR-4.6) on plain mutating POSTs | live (S10) — real replay + real 409 on body mismatch, verified over real Redis |
+| OpenAPI publishing (`packages/contracts/openapi.json`) + `contract` CI gate (diff + schemathesis) | live (S10) — generated artifact, diffed in CI; real conformance scan across every operation |
+| OWASP ZAP baseline DAST scan in CI | live (S10) — real scan against the real running API on every PR; 2 real findings fixed for real, 3 justified-and-documented allowlist entries |
+| Secrets-rotation drill (SOPS/age, provider key, JWT kid overlap) + runbook | live (S10) — SOPS/age half CI-verified on every PR (real add-then-remove rotation, scratch files); JWT kid overlap proven by real signer tests |
+| **Devon-persona quickstart (§11.6 exit criterion: "works cold")** | **live, green** (S10) — real external-integrator cold start, weekly CI-verified: register → real document ingestion → API-key-only grounded chat completion, ~6.5s end to end |
+| One-command demo | infra: `make dev` today · full demo profile: S11 |
 
 ## Quickstart (Sprint 0 scope)
 
