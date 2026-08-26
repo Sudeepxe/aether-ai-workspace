@@ -108,6 +108,9 @@ ignore = ["E501"]  # line length handled by formatter
 ]
 "scripts/**" = [
   "T201", # standalone CLI scripts (e.g. export_openapi.py) — stdout output is the point.
+  "S603", # subprocess calls here use fixed argument lists resolved via
+          # shutil.which() (see _require()), not untrusted/shell input —
+          # the "review your subprocess calls" advisory, reviewed.
 ]
 
 # ---------------------------------------------------------------- mypy -----
