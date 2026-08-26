@@ -1,0 +1,59 @@
+# Weekly (+ on-demand) verification that docs/api/quickstart.md's
+# literal claim stays true: an external integrator can register, ingest
+# a document, and get a real grounded chat completion using only an API
+# key — no source-code reading, no JWT for the actual integration
+# traffic (S10 #110, §11.6's "Devon-persona quickstart works cold").
+# Mirrors bootstrap-timing.yml's shape: scheduled + workflow_dispatch,
+# the timeout is the SLA.
+name: devon-quickstart
+on:
+  schedule: [{ cron: "0 7 * * 1" }] # weekly, Monday 07:00 UTC
+  workflow_dispatch:
+jobs:
+  verify-quickstart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - name: Start dev infra (Postgres, Redis, MinIO, ClamAV)
+        run: |
+          docker compose -f infra/compose/compose.yml --profile dev up -d --wait \
+            postgres redis minio clamav
+      - name: Migrate, provision the bucket, and start the API + worker
+        working-directory: apps/api
+        env:
+          AETHER_ENV: dev
+          AETHER_DATABASE_URL: postgresql://app_api:app-api-dev-only@localhost:5432/aether
+          AETHER_DATABASE_MIGRATOR_URL: postgresql://aether:aether-dev-only@localhost:5432/aether
+          AETHER_DATABASE_WORKER_URL: postgresql://app_worker:app-worker-dev-only@localhost:5432/aether
+          AETHER_REDIS_URL: redis://localhost:6379/0
+          # Dev-only key, already committed in .env.example (ADR-7.5) —
+          # protects nothing outside this ephemeral CI run.
+          AETHER_JWT_SIGNING_KEY: "ENa+PofIf23y5gFynYezonUkV5iu0pgeEe/PHlqCG4E=" # gitleaks:allow
+          AETHER_JWT_KID: dev-1
+        run: |
+          uv sync
+          uv run alembic upgrade head
+          uv run python -c "
+          import asyncio
+          from aether.adapters.minio.object_storage import MinioObjectStorage
+          from aether.config import get_settings
+          s = get_settings()
+          asyncio.run(MinioObjectStorage(
+              endpoint=s.object_storage_endpoint, access_key=s.object_storage_access_key,
+              secret_key=s.object_storage_secret_key, secure=s.object_storage_secure,
+              bucket=s.object_storage_bucket,
+          ).ensure_bucket())
+          "
+          uv run python -m aether.http.main &
+          uv run python -m aether.workers.main &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/readyz && exit 0
+            sleep 1
+          done
+          echo "API never became ready" >&2
+          exit 1
+      - name: Run the quickstart, exactly as docs/api/quickstart.md describes it
+        working-directory: apps/api
+        run: uv run python scripts/verify_devon_quickstart.py
