@@ -8,7 +8,7 @@ API_DIR := apps/api
 WEB_DIR := apps/web
 COMPOSE := docker compose -f infra/compose/compose.yml
 
-.PHONY: help bootstrap dev dev-observability down down-observability lint typecheck test test-integration test-contract build clean env-check secrets-edit secrets-env minio-setup openapi openapi-check
+.PHONY: help bootstrap dev dev-observability down down-observability lint typecheck test test-integration test-contract build clean env-check secrets-edit secrets-env minio-setup openapi openapi-check secrets-rotation-drill
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -81,6 +81,9 @@ openapi: ## Regenerate packages/contracts/openapi.json from the app (ADR-9.2, ge
 
 openapi-check: ## Fail if the committed spec is out of date (CI contract-drift gate, §10.2)
 	cd $(API_DIR) && uv run python scripts/export_openapi.py --check
+
+secrets-rotation-drill: ## Prove SOPS/age recipient rotation actually rotates (scratch files only, S10 #109)
+	./infra/secrets/verify-rotation-drill.sh
 
 build: ## Build container images
 	docker build -f infra/docker/api.Dockerfile -t aether-api:local .
