@@ -349,6 +349,72 @@ jobs:
         if: steps.changes.outputs.changed == 'false'
         run: echo "Skipping eval smoke — no retrieval/generation/chunking/eval-harness paths changed."
 
+  zap-baseline:
+    # S10 #108 (§7.6, §10.5): OWASP ZAP baseline scan (passive scan +
+    # OpenAPI-aware spidering, not a full active scan — a different risk/
+    # authorization class, deliberately out of scope) against the real
+    # running API. Same real api+worker boot sequence as `e2e`/
+    # `perf-smoke` above (direct `uv run`, no image build). Scans
+    # packages/contracts/openapi.json's live URL rather than relying on
+    # HTML-link spidering, which would find almost nothing on a JSON API
+    # with no HTML forms/links to follow.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - name: Start dev infra (Postgres, Redis, MinIO, ClamAV)
+        run: |
+          docker compose -f infra/compose/compose.yml --profile dev up -d --wait \
+            postgres redis minio clamav
+      - name: Migrate, provision the bucket, and start the API + worker
+        working-directory: apps/api
+        env:
+          AETHER_ENV: dev
+          AETHER_DATABASE_URL: postgresql://app_api:app-api-dev-only@localhost:5432/aether
+          AETHER_DATABASE_MIGRATOR_URL: postgresql://aether:aether-dev-only@localhost:5432/aether
+          AETHER_DATABASE_WORKER_URL: postgresql://app_worker:app-worker-dev-only@localhost:5432/aether
+          AETHER_REDIS_URL: redis://localhost:6379/0
+          # Dev-only key, already committed in .env.example (ADR-7.5) —
+          # protects nothing outside this ephemeral CI run.
+          AETHER_JWT_SIGNING_KEY: "ENa+PofIf23y5gFynYezonUkV5iu0pgeEe/PHlqCG4E=" # gitleaks:allow
+          AETHER_JWT_KID: dev-1
+        run: |
+          uv sync
+          uv run alembic upgrade head
+          uv run python -c "
+          import asyncio
+          from aether.adapters.minio.object_storage import MinioObjectStorage
+          from aether.config import get_settings
+          s = get_settings()
+          asyncio.run(MinioObjectStorage(
+              endpoint=s.object_storage_endpoint, access_key=s.object_storage_access_key,
+              secret_key=s.object_storage_secret_key, secure=s.object_storage_secure,
+              bucket=s.object_storage_bucket,
+          ).ensure_bucket())
+          "
+          uv run python -m aether.http.main &
+          uv run python -m aether.workers.main &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/readyz && exit 0
+            sleep 1
+          done
+          echo "API never became ready" >&2
+          exit 1
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
+        with:
+          target: "http://localhost:8000/openapi.json"
+          rules_file_name: "infra/zap/rules.tsv"
+          fail_action: true
+          # Per §10.5's established security-lane posture ("any failure
+          # blocks merge, no override path") — real findings, not just
+          # informational ones, must actually fail the job, not silently
+          # be filed away.
+          allow_issue_writing: false
+          # This runs on every PR against an ephemeral target; a GitHub
+          # issue per run would spam the tracker the way the rest of
+          # this security lane (gitleaks/pip-audit/npm-audit) never does.
+
   perf-smoke:
     # S9 #98 (ADR-2.4): k6 budgets against real NFR-P-1/2/3 thresholds.
     # Absolute thresholds, not yet PR-relative-regression — see
