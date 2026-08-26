@@ -8,7 +8,7 @@ API_DIR := apps/api
 WEB_DIR := apps/web
 COMPOSE := docker compose -f infra/compose/compose.yml
 
-.PHONY: help bootstrap dev dev-observability down down-observability lint typecheck test build clean env-check secrets-edit secrets-env minio-setup
+.PHONY: help bootstrap dev dev-observability down down-observability lint typecheck test test-integration test-contract build clean env-check secrets-edit secrets-env minio-setup openapi openapi-check
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -63,8 +63,18 @@ test: ## Python unit + architecture tests (integration lanes enable S1+)
 test-integration: ## Real PG/Redis via testcontainers: integration + security marks (S1+)
 	cd $(API_DIR) && uv run pytest -m "integration or security" --cov --cov-append
 
+test-contract: ## OpenAPI diff + schemathesis conformance, real PG/Redis via testcontainers (S10 #107)
+	cd $(API_DIR) && uv run python scripts/export_openapi.py --check
+	cd $(API_DIR) && uv run pytest -m contract --cov --cov-append
+
 migrate: ## Apply Alembic migrations (needs AETHER_DATABASE_MIGRATOR_URL reachable)
 	cd $(API_DIR) && uv run alembic upgrade head
+
+openapi: ## Regenerate packages/contracts/openapi.json from the app (ADR-9.2, generated artifact only)
+	cd $(API_DIR) && uv run python scripts/export_openapi.py
+
+openapi-check: ## Fail if the committed spec is out of date (CI contract-drift gate, §10.2)
+	cd $(API_DIR) && uv run python scripts/export_openapi.py --check
 
 build: ## Build container images
 	docker build -f infra/docker/api.Dockerfile -t aether-api:local .

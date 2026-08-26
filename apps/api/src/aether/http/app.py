@@ -145,8 +145,13 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Aether AI Workspace API",
         version="0.1.0",
-        # Spec is a generated, published artifact (ADR-9.2); docs routes stay
-        # enabled in dev only.
+        # The raw spec (S10 #107) is published in every env, not just dev —
+        # it isn't sensitive (no secrets, no internals beyond what a
+        # published Problem+JSON error taxonomy already documents) and is
+        # Devon's whole discovery path (§9's repo diagram, docs/api/). Only
+        # the *interactive* Swagger UI ("try it out" against real data) is
+        # dev-only — that's the OWASP API8 surface worth gating, not the spec.
+        openapi_url="/openapi.json",
         docs_url="/docs" if settings.env == "dev" else None,
         redoc_url=None,
         lifespan=_lifespan,

@@ -49,6 +49,7 @@ dev = [
   "import-linter>=2.0",
   "testcontainers[postgres,redis]>=4.8,<5",
   "asgi-lifespan>=2.1,<3",
+  "schemathesis>=3.35,<4",  # OpenAPI conformance testing, in-process (S10 #107, ADR-9.2/§10.5)
 ]
 
 [build-system]
@@ -99,13 +100,16 @@ ignore = ["E501"]  # line length handled by formatter
           # same non-credential posture as tests/**'s fixture literals.
   "T201", # cli.py is a human-facing CLI tool; stdout output is the point.
 ]
+"scripts/**" = [
+  "T201", # standalone CLI scripts (e.g. export_openapi.py) — stdout output is the point.
+]
 
 # ---------------------------------------------------------------- mypy -----
 [tool.mypy]
 python_version = "3.12"
 strict = true
 mypy_path = "src"
-packages = ["aether"]
+files = ["src/aether", "scripts"]
 warn_unreachable = true
 show_error_codes = true
 

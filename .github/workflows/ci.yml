@@ -146,6 +146,27 @@ jobs:
           args: --no-progress --offline docs README.md
           fail: true
 
+  contract:
+    # OpenAPI diff + schemathesis conformance, in-process against the
+    # real app (S10 #107, ADR-9.2, §10.2). Needs real Postgres/Redis via
+    # testcontainers for the same reason `integration` does — this app's
+    # own lifespan eagerly opens a real connection pool at startup, and
+    # schemathesis dispatches through the real ASGI app, real lifespan
+    # included (see tests/contract/test_openapi_conformance.py's
+    # module docstring).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - name: OpenAPI spec drift gate
+        working-directory: apps/api
+        run: |
+          uv sync
+          uv run python scripts/export_openapi.py --check
+      - name: Schemathesis conformance (real PG/Redis)
+        working-directory: apps/api
+        run: uv run pytest -m contract --cov --cov-append --cov-report=xml
+
   integration:
     # Real Postgres/Redis via testcontainers (docker is preinstalled on
     # ubuntu-latest runners — no service containers/socket setup needed).
