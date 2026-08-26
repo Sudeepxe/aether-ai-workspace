@@ -32,7 +32,13 @@ coverage (thread/document management via API key) is tracked
 separately; see the repo's open issues for current status rather than
 assuming this document is exhaustive.
 
-## Worked example: create a workspace, mint an API key, send a grounded chat turn
+**For the full, real, CI-verified path — including document ingestion
+and a genuinely grounded (not refused) answer — see
+[`quickstart.md`](quickstart.md).** The worked example below stays
+intentionally minimal (no ingestion step), since it exists to
+demonstrate the refusal path on a document-less workspace instead.
+
+## Worked example: create a workspace, mint an API key, send an ungrounded chat turn
 
 All requests below are plain `curl` against a running instance
 (`http://localhost:8000` in the `dev` compose profile — `make dev`).
@@ -87,10 +93,9 @@ curl -sX POST "http://localhost:8000/v1/workspaces/$WORKSPACE_ID/threads/$THREAD
 Without documents ingested into the workspace, retrieval finds nothing
 and the assistant refuses gracefully (ADR-6.4) rather than
 hallucinating — the same grammar and idempotency machinery a grounded,
-cited answer uses, just with different content. A full document-
-ingestion-through-API-key walkthrough, plus a script that proves this
-exact path works end to end on a clean checkout, lands with the
-Devon-persona quickstart (tracked separately).
+cited answer uses, just with different content. See
+[`quickstart.md`](quickstart.md) for the same flow with a real ingested
+document and a genuinely grounded, cited reply.
 
 ## Idempotent retries
 

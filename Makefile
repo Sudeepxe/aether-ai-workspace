@@ -8,7 +8,7 @@ API_DIR := apps/api
 WEB_DIR := apps/web
 COMPOSE := docker compose -f infra/compose/compose.yml
 
-.PHONY: help bootstrap dev dev-observability down down-observability lint typecheck test test-integration test-contract build clean env-check secrets-edit secrets-env minio-setup openapi openapi-check secrets-rotation-drill
+.PHONY: help bootstrap dev dev-observability down down-observability lint typecheck test test-integration test-contract build clean env-check secrets-edit secrets-env minio-setup openapi openapi-check secrets-rotation-drill devon-quickstart
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -84,6 +84,9 @@ openapi-check: ## Fail if the committed spec is out of date (CI contract-drift g
 
 secrets-rotation-drill: ## Prove SOPS/age recipient rotation actually rotates (scratch files only, S10 #109)
 	./infra/secrets/verify-rotation-drill.sh
+
+devon-quickstart: ## Prove docs/api/quickstart.md's claim for real (needs `make dev` + api + worker already running, S10 #110)
+	cd $(API_DIR) && uv run python scripts/verify_devon_quickstart.py
 
 build: ## Build container images
 	docker build -f infra/docker/api.Dockerfile -t aether-api:local .
