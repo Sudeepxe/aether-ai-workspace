@@ -1,0 +1,3 @@
+10049	IGNORE	Non-Storable Content — every non-GET/error response ZAP flags is correctly non-cacheable by design (auth/mutation responses, Problem+JSON errors); this app never intends those to be storable, so "not storable" is the correct behavior, not a gap.
+10111	IGNORE	Authentication Request Identified — informational classification only (ZAP noting it found a login-shaped endpoint), not a vulnerability by itself; carries no remediation.
+10112	IGNORE	Session Management Response Identified — informational classification only (ZAP noting a session-token-bearing response), not a vulnerability by itself; carries no remediation.

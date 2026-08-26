@@ -165,6 +165,28 @@ def create_app() -> FastAPI:
     app.middleware("http")(http_metrics_middleware)
 
     @app.middleware("http")
+    async def security_headers_middleware(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        """Two headers a JSON API still needs even with no HTML rendering
+        surface (found by S10 #108's real ZAP baseline scan, not assumed):
+        ``X-Content-Type-Options`` stops a browser from MIME-sniffing a
+        JSON response into something executable; ``Cross-Origin-Resource-
+        Policy`` stops another origin's page from loading this API's
+        responses as a subresource. ``same-origin`` matches this
+        project's single-origin deployment topology (Caddy fronts both
+        the SPA and the API, §10.0) — HSTS/CSP/Permissions-Policy are
+        deliberately not added here: ZAP's scan didn't flag them missing,
+        since those rules gate on an HTML content type this API never
+        returns.
+        """
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        return response
+
+    @app.middleware("http")
     async def request_id_middleware(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
