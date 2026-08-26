@@ -42,6 +42,19 @@ configuration for a suite that should stay a stable, boring gate. What
 500s (``not_a_server_error``), and declared success/422 response bodies
 actually match their schema and declared content type
 (``response_schema_conformance``, ``content_type_conformance``).
+
+Schemathesis still generates a mix of positive *and* negative example
+bodies during fuzzing regardless of which checks are selected (the
+checks validate responses; they don't control input generation) — for
+routes with a narrow, tightly-constrained request schema (e.g. the
+no-body auth routes, or a route whose only params are already fully
+determined), enough negative-mutation attempts get filtered as
+"doesn't even parse as a candidate example" that Hypothesis's own
+``filter_too_much`` health check trips, non-deterministically (which
+route trips it depends on the random seed, hence the different route
+each run in practice). Since nothing in this suite's check set actually
+needs negative examples to be well-formed, this is suppressed rather
+than chased per-route.
 """
 
 from __future__ import annotations
@@ -53,6 +66,7 @@ import redis.asyncio as redis_asyncio
 import schemathesis
 import schemathesis.pytest
 from schemathesis.checks import CHECKS, load_all_checks
+from schemathesis.config import HealthCheck
 
 from aether.config import get_settings
 
@@ -68,6 +82,7 @@ _CHECKS = tuple(
         ]
     )
 )
+_CONFIG = schemathesis.Config(suppress_health_check=[HealthCheck.filter_too_much])
 
 
 def _as_app_api_url(bootstrap_url: str) -> str:
@@ -90,7 +105,7 @@ def api_schema(
         from aether.http.app import create_app
 
         app = create_app()
-        yield schemathesis.openapi.from_asgi("/openapi.json", app)
+        yield schemathesis.openapi.from_asgi("/openapi.json", app, config=_CONFIG)
     finally:
         get_settings.cache_clear()
 
