@@ -65,7 +65,13 @@ test-integration: ## Real PG/Redis via testcontainers: integration + security ma
 
 test-contract: ## OpenAPI diff + schemathesis conformance, real PG/Redis via testcontainers (S10 #107)
 	cd $(API_DIR) && uv run python scripts/export_openapi.py --check
-	cd $(API_DIR) && uv run pytest -m contract --cov --cov-append
+	cd $(API_DIR) && uv run pytest -m contract
+	# No --cov here (unlike test/test-integration): this suite's own thin,
+	# schema-conformance-shaped slice of the codebase can never reach the
+	# repo-wide 80% bar in isolation, since each CI job runs coverage
+	# accounting independently in its own fresh checkout (--cov-append only
+	# accumulates *within* one job's multiple pytest invocations, not
+	# across separate jobs) — the unit/integration jobs already own that gate.
 
 migrate: ## Apply Alembic migrations (needs AETHER_DATABASE_MIGRATOR_URL reachable)
 	cd $(API_DIR) && uv run alembic upgrade head
