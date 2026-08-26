@@ -8,6 +8,33 @@ API + worker (not mocks):
 | `non-ai-crud.js` | NFR-P-3 (non-AI endpoints) | `GET /v1/me` p95 < 200ms | p95 < 300ms (see noise-margin note below) |
 | `ungrounded-chat.js` | NFR-P-1 (ungrounded) | chat-turn p95 < 800ms | p95 < 800ms |
 | `grounded-chat.js` | NFR-P-1 (grounded) | chat-turn TTFT p95 < 1500ms | p95 < 1500ms |
+| `load-shed.js` | S11 #119 — load-shed verification (§10.8) | offending identity gets real 429s; other identities unaffected | see below |
+
+A fourth script, `load-shed.js`, isn't a latency budget — it verifies
+what happens once the app is deliberately pushed *past* capacity: one
+shared identity hammers the HEAVY-class chat-send route past its 30/60s
+token-bucket budget (§3.6.3) with no pacing, while several separately-
+registered "bystander" identities make ordinary paced reads throughout
+the same window. Pass bar: the offending identity gets real `429`s with
+`Retry-After` once its bucket empties (`shed_events: count>0` — proof
+the limiter sheds under real concurrency, not just against a fake clock
+in a unit test), and the bystanders hold the same success-rate/latency
+bar `non-ai-crud.js` enforces on an otherwise-idle stack
+(`http_req_duration{scenario:bystander}`: p95 < 300ms) — i.e. shedding
+one abusive identity never degrades anyone else sharing the same
+process/pool/Redis instance.
+
+```
+AETHER_BASE_URL=http://localhost:8000 k6 run load-shed.js
+# or, against Linux/CI with docker:
+docker run --rm --network host -v "$PWD:/scripts:ro" \
+  -e AETHER_BASE_URL=http://localhost:8000 grafana/k6:0.55.0 run /scripts/load-shed.js
+```
+
+`.github/workflows/soak-release.yml` runs both the pre-release soak
+(below) and `load-shed.js` on every `v*` tag push (plus
+`workflow_dispatch` for a manual run with a shorter duration) — release-
+gating, not on the PR lane.
 
 ## Honest gaps (documented, not faked)
 
@@ -81,9 +108,17 @@ docker run --rm --network host \
   grafana/k6:0.55.0 run /scripts/non-ai-crud.js
 ```
 
-Pre-release soak (§10.5: "1h at envelope concurrency"):
+Pre-release soak (§10.5: "1h at envelope concurrency"), one script:
 
 ```
 AETHER_BASE_URL=http://localhost:8000 K6_VUS=20 K6_DURATION=1h \
   k6 run infra/k6/grounded-chat.js
 ```
+
+`.github/workflows/soak-release.yml` runs all three scripts for real —
+matrix'd (so total wall-clock stays ~1h, not 3h sequential) at the same
+"envelope" concurrency `perf-nightly.yml` already exercises nightly (10
+VUs crud/ungrounded, 5 VUs grounded — see that script's own header
+comment on the worker-throughput constraint), for the full hour — on
+every `v*` tag push, plus `workflow_dispatch` with an overridable
+duration for a manual smoke run without waiting an hour.

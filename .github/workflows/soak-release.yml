@@ -1,0 +1,152 @@
+# Pre-release soak + load-shed verification (S11 #119, §10.5: "soak:
+# 1h at envelope concurrency before each release tag" / §10.8's "soak +
+# load-shed verification" roadmap line). Not on the PR lane — this is
+# release-gating, not per-change feedback (that's ci.yml's perf-smoke
+# job, at a fraction of the duration/concurrency).
+#
+# Two independent jobs:
+#  - soak: each of the three k6 performance-budget scripts, run for a
+#    full hour at the same "envelope" concurrency perf-nightly.yml
+#    already exercises nightly (the highest concurrency this system is
+#    routinely verified to hold) — matrix'd so total wall-clock stays
+#    ~1h instead of 3h sequential.
+#  - load-shed: proves what happens once the app is deliberately pushed
+#    past one identity's rate-limit budget — real 429 shedding for the
+#    offender, zero degradation for everyone else sharing the same
+#    stack (infra/k6/load-shed.js).
+#
+# Same "not on genuinely pinned hardware" gap as perf-nightly.yml — a
+# shared GitHub Actions runner, not a dedicated perf box (documented in
+# infra/k6/README.md).
+name: soak-release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      soak_duration:
+        description: "k6 soak duration (e.g. 1h, 5m for a manual smoke run)"
+        required: false
+        default: "1h"
+      shed_duration:
+        description: "k6 load-shed scenario duration"
+        required: false
+        default: "1m"
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - script: non-ai-crud
+            vus: 10
+          - script: ungrounded-chat
+            vus: 10
+          - script: grounded-chat
+            vus: 5 # single-threaded worker ingestion consumer — see grounded-chat.js's own header comment
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - name: Start dev infra (Postgres, Redis, MinIO, ClamAV)
+        run: |
+          docker compose -f infra/compose/compose.yml --profile dev up -d --wait \
+            postgres redis minio clamav
+      - name: Migrate, provision the bucket, and start the API + worker
+        working-directory: apps/api
+        env:
+          AETHER_ENV: dev
+          AETHER_DATABASE_URL: postgresql://app_api:app-api-dev-only@localhost:5432/aether
+          AETHER_DATABASE_MIGRATOR_URL: postgresql://aether:aether-dev-only@localhost:5432/aether
+          AETHER_DATABASE_WORKER_URL: postgresql://app_worker:app-worker-dev-only@localhost:5432/aether
+          AETHER_REDIS_URL: redis://localhost:6379/0
+          AETHER_JWT_SIGNING_KEY: "ENa+PofIf23y5gFynYezonUkV5iu0pgeEe/PHlqCG4E=" # gitleaks:allow
+          AETHER_JWT_KID: dev-1
+        run: |
+          uv sync
+          uv run alembic upgrade head
+          uv run python -c "
+          import asyncio
+          from aether.adapters.minio.object_storage import MinioObjectStorage
+          from aether.config import get_settings
+          s = get_settings()
+          asyncio.run(MinioObjectStorage(
+              endpoint=s.object_storage_endpoint, access_key=s.object_storage_access_key,
+              secret_key=s.object_storage_secret_key, secure=s.object_storage_secure,
+              bucket=s.object_storage_bucket,
+          ).ensure_bucket())
+          "
+          uv run python -m aether.http.main &
+          uv run python -m aether.workers.main &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/readyz && exit 0
+            sleep 1
+          done
+          echo "API never became ready" >&2
+          exit 1
+      - name: "k6 soak: ${{ matrix.script }} @ ${{ matrix.vus }} VUs, ${{ github.event.inputs.soak_duration || '1h' }}"
+        run: |
+          docker run --rm --network host \
+            -v "${{ github.workspace }}/infra/k6:/scripts:ro" \
+            -e AETHER_BASE_URL=http://localhost:8000 \
+            -e K6_VUS=${{ matrix.vus }} \
+            -e K6_DURATION=${{ github.event.inputs.soak_duration || '1h' }} \
+            grafana/k6:0.55.0@sha256:b24f418fc99a26dd57904c952c03bfaf79462be18508acc45aafa07ff68e7df2 \
+            run "/scripts/${{ matrix.script }}.js"
+
+  load-shed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - name: Start dev infra (Postgres, Redis, MinIO, ClamAV)
+        run: |
+          docker compose -f infra/compose/compose.yml --profile dev up -d --wait \
+            postgres redis minio clamav
+      - name: Migrate, provision the bucket, and start the API + worker
+        working-directory: apps/api
+        env:
+          AETHER_ENV: dev
+          AETHER_DATABASE_URL: postgresql://app_api:app-api-dev-only@localhost:5432/aether
+          AETHER_DATABASE_MIGRATOR_URL: postgresql://aether:aether-dev-only@localhost:5432/aether
+          AETHER_DATABASE_WORKER_URL: postgresql://app_worker:app-worker-dev-only@localhost:5432/aether
+          AETHER_REDIS_URL: redis://localhost:6379/0
+          AETHER_JWT_SIGNING_KEY: "ENa+PofIf23y5gFynYezonUkV5iu0pgeEe/PHlqCG4E=" # gitleaks:allow
+          AETHER_JWT_KID: dev-1
+        run: |
+          uv sync
+          uv run alembic upgrade head
+          uv run python -c "
+          import asyncio
+          from aether.adapters.minio.object_storage import MinioObjectStorage
+          from aether.config import get_settings
+          s = get_settings()
+          asyncio.run(MinioObjectStorage(
+              endpoint=s.object_storage_endpoint, access_key=s.object_storage_access_key,
+              secret_key=s.object_storage_secret_key, secure=s.object_storage_secure,
+              bucket=s.object_storage_bucket,
+          ).ensure_bucket())
+          "
+          uv run python -m aether.http.main &
+          uv run python -m aether.workers.main &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/readyz && exit 0
+            sleep 1
+          done
+          echo "API never became ready" >&2
+          exit 1
+      - name: "k6 load-shed verification"
+        run: |
+          docker run --rm --network host \
+            -v "${{ github.workspace }}/infra/k6:/scripts:ro" \
+            -e AETHER_BASE_URL=http://localhost:8000 \
+            -e K6_SHED_DURATION=${{ github.event.inputs.shed_duration || '1m' }} \
+            grafana/k6:0.55.0@sha256:b24f418fc99a26dd57904c952c03bfaf79462be18508acc45aafa07ff68e7df2 \
+            run /scripts/load-shed.js
