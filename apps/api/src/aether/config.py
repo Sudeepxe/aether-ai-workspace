@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     # `dev` compose profile. Prod overrides this via the SOPS bundle.
     jwt_signing_key: str = "ENa+PofIf23y5gFynYezonUkV5iu0pgeEe/PHlqCG4E="
     jwt_kid: str = "dev-1"
+    # Optional overlap pair (S10 #109, §7.4/§7.6's "kid overlap" rotation
+    # runbook): set only during an active rotation window, never used to
+    # issue new tokens — verify-only, so already-issued access tokens
+    # signed under the previous key keep validating until they naturally
+    # expire, instead of every session breaking the instant the signing
+    # key rotates. Unset (None) outside a rotation window — the default,
+    # single-key posture ADR-7.2 already documents.
+    jwt_previous_signing_key: str | None = None
+    jwt_previous_kid: str | None = None
     jwt_access_ttl_seconds: int = 900
     jwt_refresh_ttl_seconds: int = 604_800
     jwt_refresh_grace_seconds: int = 30

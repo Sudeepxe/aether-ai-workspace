@@ -135,6 +135,17 @@ jobs:
         run: |
           npm ci
           npm audit --audit-level=critical
+      - name: Install sops + age (pinned versions, for the rotation drill)
+        run: |
+          curl -sSfL -o /usr/local/bin/sops \
+            https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64
+          chmod +x /usr/local/bin/sops
+          curl -sSfL https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz \
+            | tar -xz -C /tmp
+          install -m 0755 /tmp/age/age /usr/local/bin/age
+          install -m 0755 /tmp/age/age-keygen /usr/local/bin/age-keygen
+      - name: SOPS/age secrets-rotation drill (S10 #109)
+        run: ./infra/secrets/verify-rotation-drill.sh
 
   docs:
     runs-on: ubuntu-latest

@@ -34,16 +34,33 @@ _ALGORITHM = "EdDSA"
 
 
 class EdDSATokenSigner:
-    def __init__(self, *, signing_key_b64: str, kid: str, access_ttl_seconds: int) -> None:
+    def __init__(
+        self,
+        *,
+        signing_key_b64: str,
+        kid: str,
+        access_ttl_seconds: int,
+        previous_signing_key_b64: str | None = None,
+        previous_kid: str | None = None,
+    ) -> None:
         seed = base64.b64decode(signing_key_b64)
         self._private_key = Ed25519PrivateKey.from_private_bytes(seed)
         self._kid = kid
         self._access_ttl = timedelta(seconds=access_ttl_seconds)
-        # The static in-process key set (ADR-7.2). One key today; rotation
-        # adds entries here with overlapping validity, verify path unchanged.
+        # The static in-process key set (ADR-7.2). One key normally;
+        # rotation (S10 #109's kid-overlap runbook) adds a second,
+        # verify-only entry here for the overlap window — only its public
+        # half is *retained* (in self._verify_keys); self._private_key
+        # (the one this process ever signs with) stays the current key
+        # only, so a retired key can't be issued from even by a coding
+        # mistake elsewhere in this class.
         self._verify_keys: dict[str, Ed25519PublicKey] = {
             kid: self._private_key.public_key(),
         }
+        if previous_signing_key_b64 is not None and previous_kid is not None:
+            previous_seed = base64.b64decode(previous_signing_key_b64)
+            previous_private_key = Ed25519PrivateKey.from_private_bytes(previous_seed)
+            self._verify_keys[previous_kid] = previous_private_key.public_key()
 
     def issue_access_token(self, *, user_id: UUID, jti: UUID) -> str:
         now = datetime.now(UTC)

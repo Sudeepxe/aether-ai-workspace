@@ -471,6 +471,8 @@ async def build_container(settings: Settings) -> Container:
         signing_key_b64=settings.jwt_signing_key,
         kid=settings.jwt_kid,
         access_ttl_seconds=settings.jwt_access_ttl_seconds,
+        previous_signing_key_b64=settings.jwt_previous_signing_key,
+        previous_kid=settings.jwt_previous_kid,
     )
     clock = SystemClock()
     ids = Uuid7Generator()
