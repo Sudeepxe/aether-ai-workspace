@@ -1,11 +1,26 @@
-# Quarterly restore drill = ephemeral staging provisioner (ADR-10.3).
-# Skeleton — ENABLED IN S11.
+# Quarterly restore drill = ephemeral staging provisioner (ADR-10.3,
+# S11 #118). Real: two independent Postgres instances (testcontainers,
+# managed inside the script itself — docker is preinstalled on
+# ubuntu-latest), a real pg_dump/pg_restore round trip, a real RLS
+# post-restore assertion, a real vector-index rebuild, and a real app
+# serving a real request against the restored instance.
 name: restore-drill
 on:
-  schedule: [{ cron: "0 4 1 */3 *" }]
+  schedule: [{ cron: "0 4 1 */3 *" }] # quarterly
   workflow_dispatch:
 jobs:
   drill:
-    if: ${{ false }}   # ENABLED IN S11 — restore snapshot, run e2e, assert RLS + RTO
     runs-on: ubuntu-latest
-    steps: [{ run: "echo enabled in S11" }]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - name: Ensure postgresql-client (pg_dump/pg_restore) is present
+        run: |
+          command -v pg_dump >/dev/null && command -v pg_restore >/dev/null || \
+            (sudo apt-get update && sudo apt-get install -y postgresql-client)
+      - name: Run the restore drill
+        working-directory: apps/api
+        run: |
+          uv sync
+          uv run python scripts/verify_restore_drill.py
