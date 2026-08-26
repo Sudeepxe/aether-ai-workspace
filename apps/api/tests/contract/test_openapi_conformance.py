@@ -51,22 +51,38 @@ no-body auth routes, or a route whose only params are already fully
 determined), enough negative-mutation attempts get filtered as
 "doesn't even parse as a candidate example" that Hypothesis's own
 ``filter_too_much`` health check trips, non-deterministically (which
-route trips it depends on the random seed, hence the different route
-each run in practice). Since nothing in this suite's check set actually
-needs negative examples to be well-formed, this is suppressed rather
-than chased per-route.
+route trips it depends on the random seed, hence a different route each
+run in practice). Since nothing in this suite's check set actually
+needs negative examples to be well-formed, this is suppressed —
+
+via ``@hypothesis.settings(suppress_health_check=...)`` applied
+directly to the test function, deliberately *not* schemathesis's own
+``Config(suppress_health_check=...)``: reading schemathesis's source
+(``config/_projects.py``'s ``get_hypothesis_settings``) shows that
+config field is only consumed by schemathesis's *stateful*-testing
+settings builder — its own comment says as much ("stateful tests are
+not operation-specific") — while the regular per-operation
+``@schema.parametrize()`` path this suite uses
+(``generation/hypothesis/builder.py``) never references it at all. A
+first attempt used the ``Config`` field and happened to pass twice
+locally by random-seed luck before failing on a real CI run for the
+exact same underlying reason. Hypothesis's own native
+``@settings(...)`` decorator is the standard, well-established
+mechanism for a single test function to override health-check
+behavior regardless of which framework is driving generation — it
+doesn't depend on schemathesis's config-forwarding at all.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 
+import hypothesis
 import pytest
 import redis.asyncio as redis_asyncio
 import schemathesis
 import schemathesis.pytest
 from schemathesis.checks import CHECKS, load_all_checks
-from schemathesis.config import HealthCheck
 
 from aether.config import get_settings
 
@@ -82,7 +98,6 @@ _CHECKS = tuple(
         ]
     )
 )
-_CONFIG = schemathesis.Config(suppress_health_check=[HealthCheck.filter_too_much])
 
 
 def _as_app_api_url(bootstrap_url: str) -> str:
@@ -105,7 +120,7 @@ def api_schema(
         from aether.http.app import create_app
 
         app = create_app()
-        yield schemathesis.openapi.from_asgi("/openapi.json", app, config=_CONFIG)
+        yield schemathesis.openapi.from_asgi("/openapi.json", app)
     finally:
         get_settings.cache_clear()
 
@@ -114,5 +129,6 @@ schema = schemathesis.pytest.from_fixture("api_schema")
 
 
 @schema.parametrize()
+@hypothesis.settings(suppress_health_check=[hypothesis.HealthCheck.filter_too_much])
 def test_api_conforms_to_its_published_schema(case: schemathesis.Case) -> None:
     case.call_and_validate(checks=list(_CHECKS))
