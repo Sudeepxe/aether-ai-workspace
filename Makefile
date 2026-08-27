@@ -88,6 +88,13 @@ secrets-rotation-drill: ## Prove SOPS/age recipient rotation actually rotates (s
 devon-quickstart: ## Prove docs/api/quickstart.md's claim for real (needs `make dev` + api + worker already running, S10 #110)
 	cd $(API_DIR) && uv run python scripts/verify_devon_quickstart.py
 
+demo-gif: ## Regenerate docs/assets/demo.gif (needs `make dev` + minio/clamav + api + worker already running, ffmpeg on PATH, S12 #125)
+	cd apps/web && rm -rf demo-output && npx playwright test --config=playwright.demo.config.ts
+	ffmpeg -y -i apps/web/demo-output/*/video.webm \
+		-vf "fps=12,scale=800:-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer" \
+		-loop 0 docs/assets/demo.gif
+	rm -rf apps/web/demo-output
+
 build: ## Build container images
 	docker build -f infra/docker/api.Dockerfile -t aether-api:local .
 	docker build -f infra/docker/web.Dockerfile -t aether-web:local .

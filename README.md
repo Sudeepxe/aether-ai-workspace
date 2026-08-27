@@ -8,6 +8,13 @@ refusal. Built end-to-end by one engineer as an architecture-first flagship:
 the AI features are one subsystem inside a real production application
 (auth, tenancy, budgets, audit, observability, DR) — not the whole app.
 
+![Upload a document, ask a question, get a cited, grounded answer](docs/assets/demo.gif)
+
+Real footage, not a mockup: a real browser (Playwright) driving the real
+app — register, upload a document through the real ingestion pipeline,
+ask a question, and the reply cites the exact source it's grounded on.
+Recorded against `main`; regenerate any time with `make demo-gif`.
+
 > **Status: Sprint 11 — Production & DR complete.**
 > Sprints 0–10 (factory; identity & forced row-level-security tenant
 > isolation; workspace/membership/invitation CRUD, RBAC, audit logging,

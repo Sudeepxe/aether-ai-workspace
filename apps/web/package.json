@@ -10,10 +10,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "lint": "eslint src e2e",
+    "lint": "eslint src e2e e2e-demo",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write src e2e *.config.ts",
-    "format:check": "prettier --check src e2e *.config.ts",
+    "format": "prettier --write src e2e e2e-demo *.config.ts",
+    "format:check": "prettier --check src e2e e2e-demo *.config.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "e2e": "playwright test"
