@@ -15,7 +15,7 @@ app — register, upload a document through the real ingestion pipeline,
 ask a question, and the reply cites the exact source it's grounded on.
 Recorded against `main`; regenerate any time with `make demo-gif`.
 
-> **Status: Sprint 11 — Production & DR complete.**
+> **Status: v1.0 tagged.**
 > Sprints 0–10 (factory; identity & forced row-level-security tenant
 > isolation; workspace/membership/invitation CRUD, RBAC, audit logging,
 > email, rate limiting; the real-time streaming spine with cross-replica
@@ -64,13 +64,28 @@ Recorded against `main`; regenerate any time with `make demo-gif`.
 > JSON body — so the rollback rehearsal's health gate parses the body, not
 > just the status code); and a gitleaks finding on a docker `--env-file`
 > heredoc, whose `KEY=VALUE` lines can't carry the same trailing
-> `# gitleaks:allow` annotation YAML lines can. The one number this
-> project still does **not** claim: the North Star (§1.7, faithfulness ≥
-> 90% ∧ correct-refusal ≥ 90%) remains **not yet determinable** — it needs
-> a real cross-family LLM judge, and no OpenAI/Anthropic key is
-> provisioned in this environment. Every AI-facing component (chat
-> generator, embedding call, query rewrite, memory compaction) likewise
-> falls back to honest, clearly-labeled local placeholders in dev/CI —
+> `# gitleaks:allow` annotation YAML lines can.
+>
+> **Sprint 12 closes v1.0**: a real demo — a Playwright-recorded browser
+> session (register → real document ingestion → grounded, cited answer)
+> converted to the GIF above; a freshly re-run, real eval report (20/20
+> cases, all four mechanical metrics still 100%); and a third real,
+> evidenced runbook drill (`api-down.md` — a genuine container kill, a
+> genuine 2-minute `APIDown` alert firing in Alertmanager, genuine
+> recovery, which also caught and fixed a real bug in the runbook's own
+> documented commands). **v1.0 is tagged with one item honestly left
+> open**: the North Star (§1.7, faithfulness ≥ 90% ∧ correct-refusal ≥
+> 90%) remains **not yet determinable** — it needs a real cross-family
+> LLM judge, and no OpenAI/Anthropic key is provisioned in this
+> environment. Rather than hold the release indefinitely on an external
+> credential this project has no path to obtain on its own, this is a
+> deliberate, owner-approved release-with-a-known-gap decision
+> (documented in full in [`docs/architecture/prr.md`](docs/architecture/prr.md),
+> per ADR-10.5's own framing: *"the gap register is a PRR output, not a
+> confession"*) — not a claim that the gate is fully green. Every
+> AI-facing component (chat generator, embedding call, query rewrite,
+> memory compaction) falls back to honest, clearly-labeled local
+> placeholders in dev/CI —
 > real providers activate automatically the moment the corresponding API
 > key is set, no code change required. This README is honest about
 > state: no fake badges, no aspirational numbers.
@@ -127,7 +142,9 @@ resume; a thin owned **LLM router** with fallback chains; and a CI-gated
 | Load-shed verification + 1h pre-release soak (§10.5/§10.8) | live (S11) — real over-budget identity gets real `429`s with `Retry-After`; bystander identities unaffected (100% success, p95=34.9ms); soak release-gated on `v*` tags |
 | Deploy pipeline (build, SBOM, sign, push by digest) | live (S11) — real GHCR push, real syft SBOMs, real keyless cosign signing + attestation, confirmed against `main` |
 | Rollback rehearsal (deliberate bad deploy) | live (S11), honestly scoped — real health-gate detects a broken deploy and auto-reverts to last-known-good, confirmed serving real requests again; against a local/CI-ephemeral Docker host, no real VPS in this environment |
-| **Production Readiness Review attempt** ([`docs/architecture/prr.md`](docs/architecture/prr.md), ADR-10.5) | **honest, in progress** (S11) — 7 of 9 checklist lines ready with linked evidence; North Star eval and full runbook-drill coverage named as open gaps, not hidden |
+| **Production Readiness Review** ([`docs/architecture/prr.md`](docs/architecture/prr.md), ADR-10.5) | **7 of 9 lines ready** (S12) — 3 of 11 runbooks now genuinely drilled end-to-end (up from 2); North Star eval named as the one hard, honest blocker |
+| Real demo GIF (register → upload → grounded, cited answer) | **live** (S12) — Playwright-recorded against the real running stack, embedded at the top of this README, regeneratable via `make demo-gif` |
+| **v1.0 tag** | **tagged** (S12) — owner-approved release-with-a-known-gap: every checklist line closeable without an external credential is closed; the North Star line stays honestly open, not faked, per ADR-10.5's gap-register framing |
 | One-command demo | infra: `make dev` today · a dedicated `demo` compose profile is not yet built — honest gap, not yet scheduled |
 
 ## Quickstart (Sprint 0 scope)

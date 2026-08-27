@@ -7,11 +7,19 @@ evidence (a CI run, a test file, a real drill), never asserted without
 one. Per ADR-10.5's own consequence: "assertions without demonstration
 don't satisfy the gate."
 
-**Status at time of writing (S11 #120): NOT YET GREEN.** This is a
-genuine PRR *attempt* (the blueprint's own S11 exit-criterion wording),
-not a simulated pass — one hard blocker and one partial item remain,
-both honestly named below rather than hidden. Re-run and update this
-document as each remaining item closes, most likely during S12.
+**Status: v1.0 tagged with one open item, by explicit owner decision.**
+7 of 9 checklist lines are ready with real, linked evidence; line #2
+(runbook drills) is genuinely partial (3 of 11 fully drilled); line #5
+(North Star eval) is a hard blocker — no real LLM provider key exists
+in this environment, so faithfulness has never been measured. Rather
+than hold the release indefinitely on an external credential this
+project has no path to obtain on its own, the owner explicitly chose
+to tag v1.0 now with that gap named plainly (S12, 2026-08-27) —
+consistent with ADR-10.5's own framing: *"the gap register is a PRR
+output, not a confession."* This is not a claim that PRR is fully
+green; it is a documented, deliberate release-with-known-gaps
+decision. Re-run and update this document (and re-score the North Star
+line for real) the moment a provider key becomes available.
 
 ## Checklist
 
