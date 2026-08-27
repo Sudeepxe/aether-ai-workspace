@@ -7,9 +7,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: false,
     setupFiles: ["./src/test/setup.ts"],
-    // e2e/ holds Playwright specs (npm run e2e), not Vitest ones — the
-    // two runners' `test()` globals collide if Vitest also collects them.
-    exclude: ["node_modules/**", "e2e/**"],
+    // e2e/ and e2e-demo/ hold Playwright specs (npm run e2e; S12 #125's
+    // demo recording), not Vitest ones — the two runners' `test()`
+    // globals collide if Vitest also collects them.
+    exclude: ["node_modules/**", "e2e/**", "e2e-demo/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary"],

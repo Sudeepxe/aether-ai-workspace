@@ -6,7 +6,7 @@ import eslintConfigPrettier from "eslint-config-prettier";
 
 export default [
   {
-    files: ["src/**/*.{ts,tsx}", "e2e/**/*.ts"],
+    files: ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "e2e-demo/**/*.ts"],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaFeatures: { jsx: true } },
