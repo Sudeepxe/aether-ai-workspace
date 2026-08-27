@@ -32,8 +32,8 @@ VPS from infra scripts → restore drill procedure → vectors rebuild
 within budget → DNS cutover."* This runbook covers the restore-drill
 core (steps 1–5 below); VPS provisioning and DNS cutover are S11's
 real-VPS gap — no real server exists in this environment to exercise
-them against (see S11 #120's PRR document, once it lands, for the full
-honest scope note).
+them against (see [`docs/architecture/prr.md`](../architecture/prr.md)
+for the full honest scope note).
 
 1. **Provision a fresh Postgres instance and run migrations against it**
    (`alembic upgrade head`) — this recreates the current schema, roles,
