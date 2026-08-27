@@ -6,8 +6,8 @@
 
 ```
 curl -sf http://localhost:8000/healthz || echo "API not responding"
-docker compose -f infra/compose/compose.yml ps api
-docker compose -f infra/compose/compose.yml logs --tail=200 api
+docker compose -f infra/compose/compose.yml --profile dev --profile app ps api
+docker compose -f infra/compose/compose.yml --profile dev --profile app logs --tail=200 api
 ```
 
 If `healthz` responds but Prometheus still shows `up == 0`, it's a network/scrape-config problem, not an outage — check `infra/prometheus/prometheus.yml`'s `aether-api` target and that the `app` + `observability` compose profiles are on the same Docker network.
@@ -15,8 +15,8 @@ If `healthz` responds but Prometheus still shows `up == 0`, it's a network/scrap
 ## 2. If the process is actually down
 
 ```
-docker compose -f infra/compose/compose.yml --profile app up -d api
-docker compose -f infra/compose/compose.yml logs --tail=200 api
+docker compose -f infra/compose/compose.yml --profile dev --profile app up -d api
+docker compose -f infra/compose/compose.yml --profile dev --profile app logs --tail=200 api
 ```
 
 Common causes, in likelihood order:
@@ -39,3 +39,7 @@ curl -s http://localhost:9091/api/v1/query --data-urlencode 'query=up{job="aethe
 ## 4. Postmortem
 
 Any real page here (not a synthetic/burn-test firing) gets a postmortem using [`postmortem-template.md`](postmortem-template.md) — a real outage, even a self-inflicted one during dev, is worth the five minutes.
+
+## Verification (how you know it's fixed)
+
+Real-drilled (S12 #127, ADR-10.5's "executed for real at least once" bar): with the full `dev`+`app`+`observability` profile stack up, `docker compose --profile dev --profile app kill api` — confirmed `healthz` failing, `up{job="aether-api"}` at `0` within one scrape interval, and `APIDown` genuinely firing in Alertmanager after the real 2-minute sustained window. Recovered via this runbook's own step 2 command; confirmed `healthz`/`readyz` both `ok`, `up` back to `1`, and the alert cleared in Alertmanager. This drill is also what caught this doc's own commands missing `--profile dev` (compose validates the full dependency graph even for a single-service command) — the original text would have genuinely failed if followed exactly during a real incident.
