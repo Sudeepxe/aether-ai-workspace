@@ -1,7 +1,7 @@
 {
   "name": "aether-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Aether AI Workspace SPA (Blueprint Ch. 5)",
   "engines": {
