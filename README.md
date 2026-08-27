@@ -8,8 +8,8 @@ refusal. Built end-to-end by one engineer as an architecture-first flagship:
 the AI features are one subsystem inside a real production application
 (auth, tenancy, budgets, audit, observability, DR) — not the whole app.
 
-> **Status: Sprint 10 — Security hardening & API polish complete.**
-> Sprints 0–9 (factory; identity & forced row-level-security tenant
+> **Status: Sprint 11 — Production & DR complete.**
+> Sprints 0–10 (factory; identity & forced row-level-security tenant
 > isolation; workspace/membership/invitation CRUD, RBAC, audit logging,
 > email, rate limiting; the real-time streaming spine with cross-replica
 > resume/cancel; the LLM Router with usage/budget admission; the full
@@ -19,42 +19,54 @@ the AI features are one subsystem inside a real production application
 > golden-set baseline; memory service + message feedback; async workspace
 > deletion/export sagas with independent deletion verification; real
 > OpenTelemetry tracing + Prometheus/Grafana + alerting + chaos-lite + k6
-> budgets) are merged to `main`. Sprint 10 closes the last MVP-committed
-> API-surface gap and adds the security-hardening lane the blueprint
-> promised but hadn't built yet: workspace-scoped, hashed, explicitly-
-> scoped **API keys** (FR-API-2, §7.4) authenticating the chat surface
-> alongside JWT sessions behind one unified authorization model; a generic
-> **`Idempotency-Key`** replay mechanism (ADR-4.6) for plain mutating
-> POSTs, reusing existing Redis infra; **OpenAPI publishing** — the spec
-> is a real generated-and-diffed artifact (`packages/contracts/openapi.json`)
-> with a `schemathesis`-driven contract-conformance CI gate, not aspirational
-> documentation; an **OWASP ZAP baseline DAST scan** wired into CI against
-> the real running API (two real header-hardening gaps it found are now
-> fixed, not just allowlisted); a **secrets-rotation drill** covering all
-> three secret classes this system has (SOPS/age recipient, provider API
-> key, JWT signing key via a real kid-overlap mechanism), the SOPS/age half
-> proven by a real add-then-remove rotation script that runs in CI on every
-> PR; and the **Devon-persona quickstart** (§11.6's exit criterion) — a
-> real external integrator's cold-start path, CI-verified end-to-end on a
-> weekly schedule, confirmed green on a real run against `main`
-> (register → real document ingestion → API-key-only grounded chat
-> completion in ~6.5s). Several genuine bugs were found and fixed by
-> actually running things rather than assuming: an asyncpg parameter-type-
-> inference bug in the API-key last-used-timestamp coarsening SQL; a real
-> functional bug where the chat rate limiter still hard-required a JWT
-> even after the auth layer became API-key-aware; a `schemathesis`
-> dependency pin that silently forced a CVE-carrying `starlette` downgrade
-> across the whole dependency tree, caught by CI's own `pip-audit` gate;
-> and a `sops` config-discovery quirk that broke the rotation drill's own
-> first draft. The one number this project still does **not** claim: the
-> North Star (§1.7, faithfulness ≥ 90% ∧ correct-refusal ≥ 90%) remains
-> **not yet determinable** — it needs a real cross-family LLM judge, and
-> no OpenAI/Anthropic key is provisioned in this environment. Every
-> AI-facing component (chat generator, embedding call, query rewrite,
-> memory compaction) likewise falls back to honest, clearly-labeled local
-> placeholders in dev/CI — real providers activate automatically the
-> moment the corresponding API key is set, no code change required. This
-> README is honest about state: no fake badges, no aspirational numbers.
+> budgets; API keys, generic idempotency, OpenAPI publishing, ZAP DAST,
+> secrets rotation, the Devon-persona quickstart) are merged to `main`.
+> Sprint 11 closes the production-and-DR lane: a real **restore drill**
+> (§3.9.4/§8.5, ADR-10.3) — two independent Postgres instances, a real
+> `pg_dump`/`pg_restore` round trip, a real post-restore **RLS assertion**
+> (the literal "nightmare scenario" check), a real **vector-index rebuild**
+> from `chunks.content` (ADR-2.3's derived-data arithmetic), a real app
+> serving real requests against the restored instance — quarterly + on
+> demand, confirmed green on a real run against `main`; a **load-shed
+> verification** script proving the token-bucket rate limiter genuinely
+> sheds an over-budget identity (real `429`s with `Retry-After`) without
+> degrading any other identity sharing the same stack, plus a **1-hour
+> pre-release soak** at the same concurrency the nightly perf budgets
+> already exercise, both release-gated on `v*` tags; a **deploy pipeline**
+> that builds, SBOMs (syft), keyless-signs (cosign), and pushes both
+> images to GHCR by digest for real; a **rollback rehearsal** — a
+> deliberately broken deploy (unreachable DB) is detected by a real
+> health-gate and auto-reverted to the last-known-good image, confirmed
+> serving real requests again — honestly run against a local/CI-ephemeral
+> Docker host since no real VPS/SSH target exists in this environment; and
+> a real **Production Readiness Review attempt**
+> ([`docs/architecture/prr.md`](docs/architecture/prr.md), ADR-10.5) —
+> 7 of 9 checklist lines ready with linked evidence, the North Star eval
+> named as a hard blocker (no provider key), and most runbooks' own
+> step-by-step procedures honestly named as not-yet-drilled rather than
+> counted as done. Several genuine bugs were found and fixed by actually
+> running things rather than assuming: a `set_config(..., true)`
+> transaction-locality bug that silently reset RLS tenant context between
+> sequential statements in the restore drill's own seeding code; a missing
+> pgvector codec registration on ad-hoc connections; a role-grant mismatch
+> (only `app_worker`, not `app_api`, can write `chunks`) surfaced by a
+> real `InsufficientPrivilegeError`; a k6 env-var name collision
+> (`K6_VUS`/`K6_DURATION` are reserved by k6 itself and silently override
+> an explicit multi-scenario config); a `/readyz` semantics clarification
+> (it deliberately always returns HTTP 200 — degraded state lives in the
+> JSON body — so the rollback rehearsal's health gate parses the body, not
+> just the status code); and a gitleaks finding on a docker `--env-file`
+> heredoc, whose `KEY=VALUE` lines can't carry the same trailing
+> `# gitleaks:allow` annotation YAML lines can. The one number this
+> project still does **not** claim: the North Star (§1.7, faithfulness ≥
+> 90% ∧ correct-refusal ≥ 90%) remains **not yet determinable** — it needs
+> a real cross-family LLM judge, and no OpenAI/Anthropic key is
+> provisioned in this environment. Every AI-facing component (chat
+> generator, embedding call, query rewrite, memory compaction) likewise
+> falls back to honest, clearly-labeled local placeholders in dev/CI —
+> real providers activate automatically the moment the corresponding API
+> key is set, no code change required. This README is honest about
+> state: no fake badges, no aspirational numbers.
 >
 > **Branch protection note:** required status checks on `main` are enforced
 > manually (every merge verifies all CI jobs green before squashing) rather
@@ -104,7 +116,12 @@ resume; a thin owned **LLM router** with fallback chains; and a CI-gated
 | OWASP ZAP baseline DAST scan in CI | live (S10) — real scan against the real running API on every PR; 2 real findings fixed for real, 3 justified-and-documented allowlist entries |
 | Secrets-rotation drill (SOPS/age, provider key, JWT kid overlap) + runbook | live (S10) — SOPS/age half CI-verified on every PR (real add-then-remove rotation, scratch files); JWT kid overlap proven by real signer tests |
 | **Devon-persona quickstart (§11.6 exit criterion: "works cold")** | **live, green** (S10) — real external-integrator cold start, weekly CI-verified: register → real document ingestion → API-key-only grounded chat completion, ~6.5s end to end |
-| One-command demo | infra: `make dev` today · full demo profile: S11 |
+| **Restore drill (§3.9.4/§8.5, ADR-10.3) — backup/restore, RLS assertion, vector rebuild** | **live, green** (S11) — two independent Postgres instances, real `pg_dump`/`pg_restore`, real cross-tenant RLS denial check, real vector rebuild via the real embedding adapter, real app serving the restored instance; quarterly + on-demand CI, confirmed green against `main` |
+| Load-shed verification + 1h pre-release soak (§10.5/§10.8) | live (S11) — real over-budget identity gets real `429`s with `Retry-After`; bystander identities unaffected (100% success, p95=34.9ms); soak release-gated on `v*` tags |
+| Deploy pipeline (build, SBOM, sign, push by digest) | live (S11) — real GHCR push, real syft SBOMs, real keyless cosign signing + attestation, confirmed against `main` |
+| Rollback rehearsal (deliberate bad deploy) | live (S11), honestly scoped — real health-gate detects a broken deploy and auto-reverts to last-known-good, confirmed serving real requests again; against a local/CI-ephemeral Docker host, no real VPS in this environment |
+| **Production Readiness Review attempt** ([`docs/architecture/prr.md`](docs/architecture/prr.md), ADR-10.5) | **honest, in progress** (S11) — 7 of 9 checklist lines ready with linked evidence; North Star eval and full runbook-drill coverage named as open gaps, not hidden |
+| One-command demo | infra: `make dev` today · a dedicated `demo` compose profile is not yet built — honest gap, not yet scheduled |
 
 ## Quickstart (Sprint 0 scope)
 
