@@ -1,6 +1,6 @@
 # Aether Eval Report
 
-**Generated:** 2026-08-23T20:13:17+00:00
+**Generated:** 2026-08-27T14:14:20+00:00
 **Golden set:** v1 (20 cases — 5 adversarial, 6 answerable, 4 multi_turn, 5 unanswerable)
 **Environment:** LocalHashEmbeddingAdapter (embedding_version=1) unless a real OpenAI/Anthropic key is configured; EchoGenerator unless a real provider key is configured.
 
