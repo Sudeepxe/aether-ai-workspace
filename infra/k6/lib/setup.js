@@ -84,6 +84,43 @@ export function authHeaders(token) {
   return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
 
+// JWT access tokens are short-lived (900s, config.py's jwt_access_ttl_
+// seconds) — every script here logs in once per VU and holds that
+// token for the VU's entire lifetime. That's invisible at smoke/nightly
+// durations (30s-2m, nowhere near 900s) but a real, observed failure at
+// soak duration (1h): ~75% of a real 1h soak run's requests came back
+// 401 once the token aged past 15 minutes, caught on the very first
+// real full-hour soak run against a tagged release (S12 v1.0.0), not
+// assumed from reading the TTL config. login()'s Set-Cookie response
+// puts the refresh token in k6's per-VU cookie jar automatically (same
+// HttpOnly-cookie mechanism the real web app's authRefresh.ts uses) —
+// POST /v1/auth/refresh needs no body, just that cookie already being
+// present.
+export function refreshAccessToken() {
+  const res = http.post(`${BASE_URL}/v1/auth/refresh`, null, {
+    headers: { "Content-Type": "application/json" },
+  });
+  check(res, { "token refresh succeeded": (r) => r.status === 200 });
+  return res.json("access_token");
+}
+
+// Wraps a request-issuing closure (a function of the current token,
+// returning a k6 http.Response) with transparent 401-triggered token
+// refresh-and-retry — the response actually check()'d by the caller is
+// always the final, post-refresh attempt, not the stale-token 401.
+// `ctx` is the script's per-VU context object (e.g. `vuCtx`/`data`);
+// its `.token` field is updated in place so every subsequent call
+// picks up the refreshed token without the caller having to thread it
+// through by hand.
+export function withTokenRefresh(ctx, issueRequest) {
+  let res = issueRequest(ctx.token);
+  if (res.status === 401) {
+    ctx.token = refreshAccessToken();
+    res = issueRequest(ctx.token);
+  }
+  return res;
+}
+
 // S3/MinIO presigned POST forms require every policy-condition field to
 // appear *before* the file field in the multipart body (the server
 // processes fields as a stream and needs them already accumulated by

@@ -4,7 +4,7 @@
 // not the AI-facing chat/generation routes budgeted separately.
 import http from "k6/http";
 import { check, sleep } from "k6";
-import { BASE_URL, registerAndLogin, authHeaders } from "./lib/setup.js";
+import { BASE_URL, registerAndLogin, authHeaders, withTokenRefresh } from "./lib/setup.js";
 
 export const options = {
   scenarios: {
@@ -37,19 +37,25 @@ export const options = {
 // — this is a lazy one-time-per-VU login, not k6's `setup()` hook
 // (which runs exactly once *globally* and would make every VU share
 // one user's rate-limit budget, tripping real 429s under concurrent
-// load and measuring the rate limiter instead of NFR-P-3).
-let vuToken = null;
+// load and measuring the rate limiter instead of NFR-P-3). `vuCtx` is
+// mutable so `withTokenRefresh` (see lib/setup.js) can update its
+// `.token` field in place once the access token ages past its real
+// 900s TTL — load-bearing at soak duration (1h), invisible at this
+// script's own short smoke default.
+let vuCtx = null;
 
 function ensureLoggedIn() {
-  if (vuToken === null) {
-    vuToken = registerAndLogin("k6-crud");
+  if (vuCtx === null) {
+    vuCtx = { token: registerAndLogin("k6-crud") };
   }
-  return vuToken;
+  return vuCtx;
 }
 
 export default function () {
-  const token = ensureLoggedIn();
-  const res = http.get(`${BASE_URL}/v1/me`, { headers: authHeaders(token) });
+  const ctx = ensureLoggedIn();
+  const res = withTokenRefresh(ctx, (token) =>
+    http.get(`${BASE_URL}/v1/me`, { headers: authHeaders(token) })
+  );
   check(res, { "200 OK": (r) => r.status === 200 });
   // Paced to stay under the real CHEAP-class rate limit (120/60s per
   // user, §3.6.3) — this budgets *latency*, not throughput; hammering
