@@ -22,6 +22,7 @@ import {
   authHeaders,
   uploadToPresignedS3Form,
   staggerVuStart,
+  withTokenRefresh,
 } from "./lib/setup.js";
 
 // Same script serves the PR-smoke (default: 2 VUs, 40s) and the
@@ -138,9 +139,15 @@ export default function () {
     content: "What is Chaos Corp's money-back guarantee period?",
     client_message_id: `k6-${__VU}-${__ITER}-${Date.now()}`,
   });
-  const headers = authHeaders(data.token);
-  headers["Accept"] = "text/event-stream";
-  const res = http.post(url, body, { headers: headers, tags: { name: "chat" } });
+  // withTokenRefresh (lib/setup.js): the access token ages past its
+  // real 900s TTL over a 1h soak run — invisible at this script's own
+  // short smoke default, a real ~75% failure rate at soak duration
+  // (caught on the first real 1h run against a tagged release).
+  const res = withTokenRefresh(data, (token) => {
+    const headers = authHeaders(token);
+    headers["Accept"] = "text/event-stream";
+    return http.post(url, body, { headers: headers, tags: { name: "chat" } });
+  });
   check(res, {
     "200 OK": (r) => r.status === 200,
     // Whitespace-tolerant: FastAPI's default json.dumps separators
