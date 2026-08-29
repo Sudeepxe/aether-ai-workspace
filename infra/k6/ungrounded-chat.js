@@ -46,9 +46,14 @@ let vuCtx = null;
 function ensureVuContext() {
   if (vuCtx === null) {
     staggerVuStart();
-    const token = registerAndLogin("k6-ungrounded");
-    const created = createWorkspaceAndThread(token, "k6 ungrounded");
-    vuCtx = { token: token, workspaceId: created.workspaceId, threadId: created.threadId };
+    const logged = registerAndLogin("k6-ungrounded");
+    const created = createWorkspaceAndThread(logged.token, "k6 ungrounded");
+    vuCtx = {
+      token: logged.token,
+      refreshCookie: logged.refreshCookie,
+      workspaceId: created.workspaceId,
+      threadId: created.threadId,
+    };
   }
   return vuCtx;
 }
