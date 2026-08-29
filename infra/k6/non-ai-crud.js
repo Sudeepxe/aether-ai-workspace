@@ -46,7 +46,7 @@ let vuCtx = null;
 
 function ensureLoggedIn() {
   if (vuCtx === null) {
-    vuCtx = { token: registerAndLogin("k6-crud") };
+    vuCtx = registerAndLogin("k6-crud");
   }
   return vuCtx;
 }

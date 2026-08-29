@@ -40,6 +40,21 @@ function postWithRetry(url, body, params, checkLabel) {
   throw new Error(`${checkLabel}: exhausted retries, still 429 after 5 attempts`);
 }
 
+// Cookie name the API sets the refresh token under (cookies.py's
+// REFRESH_COOKIE_NAME) — a "__Host-" prefixed cookie, so Secure/Path=/
+// with no Domain attribute.
+const REFRESH_COOKIE_NAME = "__Host-refresh_token";
+
+// Returns { token, refreshCookie } rather than a bare access-token
+// string: withTokenRefresh (below) needs the raw refresh-cookie value
+// too, and k6's automatic per-VU cookie jar does NOT survive across
+// iterations of the same VU (confirmed empirically, not assumed from
+// docs — a debug script logging in once and refreshing several
+// iterations later got a real, reproducible "no refresh cookie
+// presented" 401 on the very first refresh attempt, while the same
+// login->refresh sequence issued within one iteration worked). So the
+// refresh cookie's value is threaded through explicitly instead of
+// trusted to any implicit jar.
 export function registerAndLogin(emailPrefix) {
   const email = `${emailPrefix}-${__VU}-${Date.now()}@example.com`;
   const password = "s3cret!!";
@@ -56,7 +71,10 @@ export function registerAndLogin(emailPrefix) {
     jsonHeaders,
     "login succeeded"
   );
-  return loginRes.json("access_token");
+  return {
+    token: loginRes.json("access_token"),
+    refreshCookie: loginRes.cookies[REFRESH_COOKIE_NAME][0].value,
+  };
 }
 
 export function createWorkspaceAndThread(token, name) {
@@ -91,17 +109,39 @@ export function authHeaders(token) {
 // soak duration (1h): ~75% of a real 1h soak run's requests came back
 // 401 once the token aged past 15 minutes, caught on the very first
 // real full-hour soak run against a tagged release (S12 v1.0.0), not
-// assumed from reading the TTL config. login()'s Set-Cookie response
-// puts the refresh token in k6's per-VU cookie jar automatically (same
-// HttpOnly-cookie mechanism the real web app's authRefresh.ts uses) —
-// POST /v1/auth/refresh needs no body, just that cookie already being
-// present.
-export function refreshAccessToken() {
+// assumed from reading the TTL config.
+//
+// The refresh cookie is attached explicitly via a `Cookie` header, not
+// left to k6's automatic jar (see registerAndLogin's comment — the jar
+// does not survive across iterations of the same VU, confirmed
+// empirically). A successful refresh also *rotates* the refresh token
+// (refresh_session.py's real reuse-detection design: presenting an
+// already-used refresh token outside a short grace window revokes the
+// entire family) — so the response's own Set-Cookie must be captured
+// and `ctx.refreshCookie` updated, or the *next* refresh would present
+// a stale, already-rotated-out cookie and get treated as a theft
+// signal. This was a second real bug this fix went through: an
+// intermediate version that read the access token but not the rotated
+// cookie value looked correct locally (one refresh) but broke on a
+// second refresh cycle in exactly this way (only caught by an
+// accelerated-TTL local reproduction, not assumed).
+export function refreshAccessToken(ctx) {
   const res = http.post(`${BASE_URL}/v1/auth/refresh`, null, {
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Cookie: `${REFRESH_COOKIE_NAME}=${ctx.refreshCookie}` },
   });
   check(res, { "token refresh succeeded": (r) => r.status === 200 });
-  return res.json("access_token");
+  if (res.status !== 200) {
+    return false;
+  }
+  ctx.token = res.json("access_token");
+  // Absent when the request landed inside the same-device grace window
+  // (refresh_session.py's benign-race path): the existing successor
+  // cookie is still the current one, nothing to rotate.
+  const rotated = res.cookies[REFRESH_COOKIE_NAME];
+  if (rotated && rotated[0]) {
+    ctx.refreshCookie = rotated[0].value;
+  }
+  return true;
 }
 
 // Wraps a request-issuing closure (a function of the current token,
@@ -109,13 +149,12 @@ export function refreshAccessToken() {
 // refresh-and-retry — the response actually check()'d by the caller is
 // always the final, post-refresh attempt, not the stale-token 401.
 // `ctx` is the script's per-VU context object (e.g. `vuCtx`/`data`);
-// its `.token` field is updated in place so every subsequent call
-// picks up the refreshed token without the caller having to thread it
-// through by hand.
+// its `.token`/`.refreshCookie` fields are updated in place so every
+// subsequent call picks up the refreshed credentials without the
+// caller having to thread them through by hand.
 export function withTokenRefresh(ctx, issueRequest) {
   let res = issueRequest(ctx.token);
-  if (res.status === 401) {
-    ctx.token = refreshAccessToken();
+  if (res.status === 401 && refreshAccessToken(ctx)) {
     res = issueRequest(ctx.token);
   }
   return res;

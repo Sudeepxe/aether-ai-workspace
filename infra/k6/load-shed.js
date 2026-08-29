@@ -73,7 +73,10 @@ const shedEvents = new Counter("shed_events");
 // has to be created once and handed to every abuser VU via k6's
 // setup()-return-value sharing mechanism.
 export function setup() {
-  const abuserToken = registerAndLogin("k6-abuser");
+  // registerAndLogin returns { token, refreshCookie } (S12's soak-token-
+  // refresh fix) — only .token is needed here, this script's durations
+  // (well under the 900s access-token TTL) never need a refresh.
+  const abuserToken = registerAndLogin("k6-abuser").token;
   const headers = authHeaders(abuserToken);
   const wsRes = http.post(
     `${BASE_URL}/v1/workspaces`,
@@ -124,7 +127,7 @@ let bystanderToken = null;
 export function bystand() {
   if (bystanderToken === null) {
     staggerVuStart();
-    bystanderToken = registerAndLogin("k6-bystander");
+    bystanderToken = registerAndLogin("k6-bystander").token;
   }
   const res = http.get(`${BASE_URL}/v1/me`, {
     headers: authHeaders(bystanderToken),
