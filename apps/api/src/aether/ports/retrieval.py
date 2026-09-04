@@ -39,6 +39,17 @@ class ChunkSearchResult:
     fuses by rank, not by this raw value."""
 
 
+class ChunkSearchUnavailableError(Exception):
+    """The vector search backend is genuinely, expectedly unavailable —
+    a connection failure, a statement timeout, or the index not yet
+    usable (e.g. mid-rebuild) — not a bug in the caller. This is the
+    only exception HybridSearch treats as its documented degraded
+    (lexical-only) fallback trigger (§3.2.5); an adapter must let any
+    other exception propagate unchanged, since that signals a real
+    defect rather than an expected infrastructure failure. Mirrors
+    ports.llm.ProviderError's role for the LLM router."""
+
+
 class ChunkSearchPort(Protocol):
     async def search_vector(
         self, workspace_id: UUID, *, embedding: list[float], limit: int
@@ -48,7 +59,12 @@ class ChunkSearchPort(Protocol):
         mid-pipeline) document, and belong to this workspace are
         candidates — enforced by an explicit WHERE clause in addition
         to RLS (§3.2.5: "tenant filter is a mandatory, type-enforced
-        parameter" on top of RLS, not instead of it)."""
+        parameter" on top of RLS, not instead of it).
+
+        Raises ``ChunkSearchUnavailableError`` for an expected
+        infrastructure failure (connection lost, statement timeout,
+        index unavailable) — any other exception is a real bug and
+        must propagate as-is."""
         ...
 
     async def search_lexical(
