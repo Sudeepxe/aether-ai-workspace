@@ -281,11 +281,11 @@ async def test_router_falls_back_to_groq_when_earlier_providers_are_unavailable(
     groq_capability = ProviderCapability(
         provider="groq",
         model="openai/gpt-oss-20b",
-        max_context_tokens=128_000,
+        max_context_tokens=131_072,
         supports_tools=True,
         supports_vision=False,
-        cost_per_1k_prompt_microcents=5_900,
-        cost_per_1k_completion_microcents=7_900,
+        cost_per_1k_prompt_microcents=7_500,
+        cost_per_1k_completion_microcents=30_000,
     )
     groq = FakeProviderAdapter(name="groq", chunks=["real groq reply"], capability=groq_capability)
     router, breakers = _router(
