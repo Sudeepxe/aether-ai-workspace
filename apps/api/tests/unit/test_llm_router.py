@@ -266,6 +266,46 @@ async def test_concurrency_semaphore_bounds_in_flight_requests_per_provider() ->
     assert tracked.current_concurrency == 0  # every semaphore slot was released
 
 
+async def test_router_falls_back_to_groq_when_earlier_providers_are_unavailable() -> None:
+    """LlmRouter is fully provider-agnostic (every other test in this
+    file proves that generically) — this test exists specifically
+    because the Groq integration task asked for explicit router-level
+    fallback coverage naming Groq, not just implicit coverage via a
+    generic "backup" fixture name."""
+    openai_down = FakeProviderAdapter(
+        name="openai", chunks=[], error=ProviderError("down", retryable=True), fail_after=0
+    )
+    anthropic_down = FakeProviderAdapter(
+        name="anthropic", chunks=[], error=ProviderError("down", retryable=True), fail_after=0
+    )
+    groq_capability = ProviderCapability(
+        provider="groq",
+        model="openai/gpt-oss-20b",
+        max_context_tokens=128_000,
+        supports_tools=True,
+        supports_vision=False,
+        cost_per_1k_prompt_microcents=5_900,
+        cost_per_1k_completion_microcents=7_900,
+    )
+    groq = FakeProviderAdapter(name="groq", chunks=["real groq reply"], capability=groq_capability)
+    router, breakers = _router(
+        providers={"openai": openai_down, "anthropic": anthropic_down, "groq": groq},
+        model_chain=[
+            ("openai", "gpt-4o-mini"),
+            ("anthropic", "claude-haiku-4-5"),
+            ("groq", "openai/gpt-oss-20b"),
+        ],
+    )
+
+    chunks = [c async for c in router.generate(thread_history=[], user_content="hi")]
+
+    assert chunks[0] == "real groq reply"
+    assert len(openai_down.calls) == 1
+    assert len(anthropic_down.calls) == 1
+    assert len(groq.calls) == 1
+    assert breakers["groq"].state.value == "closed"
+
+
 async def test_no_context_uses_the_plain_system_prompt() -> None:
     provider = FakeProviderAdapter(name="fake", chunks=["ok"])
     router, _ = _router(providers={"fake": provider}, model_chain=[("fake", "fake-model")])

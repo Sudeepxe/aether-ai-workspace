@@ -109,7 +109,7 @@ curl -s -X POST http://localhost:8000/v1/workspaces/<ws>/threads/<t>/messages \
 ```
 
 **Honest gap:** step 4's real-provider-call verification needs an
-actual configured `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` — this dev/CI
+actual configured `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`GROQ_API_KEY` — this dev/CI
 environment has none (the whole project's generation path honestly
 falls back to `EchoGenerator` without one, see
 `http/composition.py`'s `_build_generator`), so this step has not been
