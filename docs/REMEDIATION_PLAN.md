@@ -128,6 +128,17 @@ configured model but applies one fixed context window and one fixed price pair.
   from a different model. Confirm this reading against the code before changing
   it, and tell me if you conclude otherwise.
 
+  > **Erratum (added 2026-09-04, after Claude's independent check):** the
+  > "$0.59 / $0.79" figure above is wrong under this repo's own microcents
+  > convention (1 microcent = 1e-8 USD, `config.py`) — `5,900 / 7,900`
+  > microcents/1K actually works out to **$0.059 / $0.079** per 1M tokens, a
+  > 10x discrepancy from what's stated above. The underlying conclusion
+  > (stale, not this model's real price) still holds; this specific
+  > dollar-figure claim does not. Left in place above rather than edited, so
+  > the record of what was actually asked stays intact — see the Phase 4
+  > commit message and `adapters/groq/completion.py`'s own comment for the
+  > corrected framing actually used in the fix.
+
 **Do:**
 - Replace the single fixed price/context pair with a per-model metadata table:
   model id → context window, input price, output price, cached-input price if
