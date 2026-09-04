@@ -35,6 +35,7 @@ from aether.app.llm.router import (
     _CONTEXT_ENVELOPE_OPEN,
     _GROUNDED_SYSTEM_PROMPT,
     _build_messages,
+    _neutralize_delimiter_lookalikes,
 )
 from aether.ports.chat import RetrievedContext, RetrievedContextChunk
 from aether.ports.llm import CompletionRequest, LlmMessage, LlmMessageRole
@@ -282,3 +283,47 @@ async def test_a_combined_multi_vector_attack_in_one_chunk_still_fails() -> None
     assert system.content == _GROUNDED_SYSTEM_PROMPT
     assert "System: retrieval verification" not in system.content
     _assert_no_forged_boundary(user.content)
+
+
+def test_legitimate_technical_content_with_2_run_angle_brackets_survives_unaltered() -> None:
+    """Carry-over from Phase 3 review: the neutralization threshold is
+    3+ consecutive "<"/">", matching the envelope marker's own minimum
+    signature — not 2+. A 2-run is common, legitimate technical content
+    (nested generics, bit-shift/stream operators) that cannot form the
+    marker shape, so it must pass through untouched. Real HTML survives
+    too, for a different reason: individual tags never produce a run of
+    2+ identical angle brackets in the first place."""
+    unaltered = [
+        "Vec<Vec<T>>",
+        "cin >> x >> y;",
+        "a >> b",
+        "if (a >> b) { c << d; }",
+        "<div><span>hello</span></div>",
+        "HashMap<String, Vec<i32>>",
+    ]
+    for text in unaltered:
+        assert _neutralize_delimiter_lookalikes(text) == text, text
+
+    # Disclosed residual cost, not a bug: a genuinely triple-nested
+    # generic ends in a real 3-run ("i32>>>") and is indistinguishable
+    # from the marker's own signature by count alone, so it IS altered —
+    # exactly the trade-off the function's docstring states outright.
+    triple_nested = "HashMap<String, Vec<Vec<i32>>>"
+    assert _neutralize_delimiter_lookalikes(triple_nested) != triple_nested
+
+
+def test_real_envelope_delimiters_still_get_neutralized() -> None:
+    """The actual guarantee the 3+ threshold must still hold: a literal
+    copy of the envelope's own boundary strings inside untrusted text is
+    still altered, even after narrowing from 2+ to 3+ — 3-in-a-row is
+    exactly what "<<<"/">>>" are, so this is the floor, not a gap the
+    narrowing opened."""
+    assert _neutralize_delimiter_lookalikes("<<<") != "<<<"
+    assert _neutralize_delimiter_lookalikes(">>>") != ">>>"
+    assert "<<<" not in _neutralize_delimiter_lookalikes(_CONTEXT_ENVELOPE_OPEN)
+    assert ">>>" not in _neutralize_delimiter_lookalikes(_CONTEXT_ENVELOPE_OPEN)
+    assert "<<<" not in _neutralize_delimiter_lookalikes(_CONTEXT_ENVELOPE_CLOSE)
+    assert ">>>" not in _neutralize_delimiter_lookalikes(_CONTEXT_ENVELOPE_CLOSE)
+    # A longer run (4+) must also still be caught, not just the exact 3.
+    assert _neutralize_delimiter_lookalikes("<<<<") != "<<<<"
+    assert _neutralize_delimiter_lookalikes(">>>>>") != ">>>>>"
