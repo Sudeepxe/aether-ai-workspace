@@ -18,3 +18,38 @@ CVE-2026-13221
 CVE-2026-42496
 CVE-2026-57433
 CVE-2026-8376
+
+# CVE-2026-56854 is a CRITICAL SSH server-side auth-bypass in
+# golang.org/x/crypto/ssh@v0.52.0 (fixed 0.55.0), flagged as a gobinary
+# finding against usr/bin/caddy in the pinned caddy:2-alpine base image
+# used by infra/docker/web.Dockerfile (aether-web:ci scan only — the
+# aether-api:ci image doesn't contain this binary).
+#
+# Reachability was checked, not assumed, before accepting this risk:
+#   - `govulncheck -mode=binary` against the real extracted caddy binary
+#     (pulled at the exact pinned digest) confirms the vulnerable
+#     ssh.NewServerConn symbol IS compiled in — it's a transitive
+#     dependency of Caddy's built-in `pki` app (github.com/smallstep/
+#     certificates, step-ca's SSH CA support), not something Caddy
+#     itself exposes.
+#   - `caddy list-modules` on that same binary lists all 134 compiled-in
+#     Caddy modules: none contain "ssh". Caddy's own config schema
+#     (Caddyfile or JSON) has no module that can start an SSH server —
+#     there is no config-reachable way to activate this code path.
+#   - `caddy help` lists every CLI subcommand: no SSH-related subcommand
+#     exists either.
+#   - This deployment uses the image's own default Caddyfile (no custom
+#     config is supplied — see web.Dockerfile), which only enables
+#     `file_server` on `:80`. web.Dockerfile EXPOSEs port 80 only; the
+#     image itself declares 80/443/2019 (admin API), never 22.
+# Net: the vulnerable function is present in the binary but dead code
+# from every actual entrypoint this deployment uses — no config, CLI
+# invocation, or listening port reaches it.
+# No patched tag exists yet (checked 2026-09-04): caddy:2-alpine,
+# caddy:latest, and caddy:2 are all byte-identical to the pinned digest;
+# caddy:2.10-alpine is strictly worse (same unfixed CVE plus additional
+# CRITICALs in its bundled Go binaries).
+# Revisit: bump the caddy:2-alpine pin as soon as an upstream image
+# ships golang.org/x/crypto >= 0.55.0, or immediately if Aether ever
+# gains a feature that runs an actual SSH server in this image.
+CVE-2026-56854
