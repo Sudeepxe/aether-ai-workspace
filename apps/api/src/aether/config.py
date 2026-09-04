@@ -76,6 +76,19 @@ class Settings(BaseSettings):
     # real values come from the SOPS bundle (ADR-7.5), never committed.
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    # Groq: a third, optional OpenAI-compatible provider (its own Chat
+    # Completions surface is wire-compatible with OpenAI's — see
+    # adapters/openai_compatible/completion.py). Same "empty string is
+    # not a usable key" fallback posture as the two providers above —
+    # composition.py only instantiates a live Groq adapter when this is
+    # actually set. Model kept as its own setting, deliberately separate
+    # from the credential (unlike openai/anthropic, whose model names are
+    # still hardcoded per-call-site pending a similar extraction) — Groq's
+    # catalog changes often enough that a compiled-in constant would go
+    # stale faster than the credential itself does.
+    groq_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "openai/gpt-oss-20b"
 
     # --- Usage metering & budgets (Sprint 4, §3.2.14) --------------------
     # cost_microcents units throughout: 1 microcent = 1e-6 US cent =

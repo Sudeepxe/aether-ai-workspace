@@ -97,6 +97,41 @@ cited answer uses, just with different content. See
 [`quickstart.md`](quickstart.md) for the same flow with a real ingested
 document and a genuinely grounded, cited reply.
 
+## LLM providers behind chat generation
+
+Chat generation (`POST .../messages`) runs through an internal
+`LlmRouter` (§3.2.4, ADR-3.5) with an ordered provider fallback chain —
+callers never choose a provider directly. Three providers are
+supported, each optional and independently configured by environment
+variable; a provider only joins the fallback chain if its key is
+actually set:
+
+| Provider | Enable with | Default model | Default base URL |
+|---|---|---|---|
+| OpenAI | `AETHER_OPENAI_API_KEY` | `gpt-4o-mini` | `https://api.openai.com/v1` |
+| Anthropic | `AETHER_ANTHROPIC_API_KEY` | `claude-haiku-4-5` | `https://api.anthropic.com/v1` |
+| Groq | `AETHER_GROQ_API_KEY` | `AETHER_GROQ_MODEL` (default `openai/gpt-oss-20b`) | `AETHER_GROQ_BASE_URL` (default `https://api.groq.com/openai/v1`) |
+
+Fallback order matches the table above (OpenAI → Anthropic → Groq) when
+more than one is configured. With none configured — the default state
+of this repository's own dev/CI environment — chat generation falls
+back to `EchoGenerator`, a real, honest local generator (not a mock):
+it echoes retrieved context verbatim so the grounding/citation pipeline
+still runs and is testable end to end, with zero real provider spend.
+
+Groq is reachable via an OpenAI-compatible Chat Completions endpoint,
+so its adapter reuses the same request/streaming logic
+`OpenAiCompletionAdapter` uses (`adapters/openai_compatible/`) rather
+than a separate implementation — only the base URL, credential, and
+model differ.
+
+**Embeddings are a separate concern, unaffected by any of the above.**
+Document ingestion/retrieval always uses the existing embedding
+pipeline (OpenAI `text-embedding-3-small` when `AETHER_OPENAI_API_KEY`
+is set, otherwise a local, honest, non-semantic fallback) — configuring
+Groq (or Anthropic) does not change, and cannot substitute for, how
+documents get embedded or retrieved.
+
 ## Idempotent retries
 
 Plain mutating POSTs (workspace creation, invitation creation, API-key
