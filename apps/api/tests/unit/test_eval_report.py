@@ -8,6 +8,8 @@ from evals.harness.schema import CaseClass
 
 pytestmark = pytest.mark.unit
 
+_EMBEDDER_LABEL = "local-hash-fallback (embedding_version=1)"
+
 
 def _agg(**overrides: object) -> AggregateMetrics:
     defaults: dict[str, object] = {
@@ -43,7 +45,11 @@ def _case(case_id: str = "case-1") -> CaseMetrics:
 
 def test_north_star_is_reported_as_not_yet_determinable_without_faithfulness_data() -> None:
     report = render_report(
-        agg=_agg(), case_metrics=[_case()], faithfulness=[], generated_at="2026-01-01T00:00:00Z"
+        agg=_agg(),
+        case_metrics=[_case()],
+        faithfulness=[],
+        generated_at="2026-01-01T00:00:00Z",
+        embedder_label=_EMBEDDER_LABEL,
     )
     assert "Not yet determinable" in report
     assert "no LLM provider key configured" in report
@@ -61,6 +67,7 @@ def test_north_star_reports_met_when_both_targets_clear_the_bar() -> None:
         case_metrics=[_case()],
         faithfulness=faithfulness,
         generated_at="2026-01-01T00:00:00Z",
+        embedder_label=_EMBEDDER_LABEL,
     )
     assert "**met**" in report
     assert "NOT met" not in report
@@ -81,6 +88,7 @@ def test_north_star_reports_not_met_when_faithfulness_is_below_target() -> None:
         case_metrics=[_case()],
         faithfulness=faithfulness,
         generated_at="2026-01-01T00:00:00Z",
+        embedder_label=_EMBEDDER_LABEL,
     )
     assert "NOT met" in report
 
@@ -91,13 +99,33 @@ def test_adversarial_safety_explains_the_echo_generator_limitation_when_not_appl
         case_metrics=[_case()],
         faithfulness=[],
         generated_at="2026-01-01T00:00:00Z",
+        embedder_label=_EMBEDDER_LABEL,
     )
     assert "Not applicable under EchoGenerator" in report
 
 
+def test_reports_the_actual_embedder_label_it_was_given_not_a_hardcoded_one() -> None:
+    """Task A follow-up: the report used to hardcode 'LocalHashEmbeddingAdapter'
+    in its own text, independent of what actually produced the run's
+    numbers. It must now say whatever label the caller passed in."""
+    report = render_report(
+        agg=_agg(),
+        case_metrics=[_case()],
+        faithfulness=[],
+        generated_at="2026-01-01T00:00:00Z",
+        embedder_label="text-embedding-3-small (embedding_version=1)",
+    )
+    assert "text-embedding-3-small (embedding_version=1)" in report
+    assert "LocalHashEmbeddingAdapter" not in report
+
+
 def test_known_gaps_section_always_present() -> None:
     report = render_report(
-        agg=_agg(), case_metrics=[_case()], faithfulness=[], generated_at="2026-01-01T00:00:00Z"
+        agg=_agg(),
+        case_metrics=[_case()],
+        faithfulness=[],
+        generated_at="2026-01-01T00:00:00Z",
+        embedder_label=_EMBEDDER_LABEL,
     )
     assert "Known gaps" in report
     assert "No real LLM provider key" in report
@@ -116,6 +144,7 @@ def test_a_failed_case_is_reported_with_its_error_not_silently_dropped() -> None
         case_metrics=[failed_case],
         faithfulness=[],
         generated_at="2026-01-01T00:00:00Z",
+        embedder_label=_EMBEDDER_LABEL,
     )
     assert "broken-case" in report
     assert "RuntimeError: fixture missing" in report

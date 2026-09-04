@@ -16,10 +16,10 @@ import asyncpg
 import httpx
 
 from aether.adapters.clamav.scanner import ClamAvScanner
-from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.postgres.ingestion_repository import PostgresIngestionRepository
 from aether.app.ingestion.process_document import DocumentProcessor
+from aether.ports.embedding import EmbeddingProviderPort
 from aether.ports.ingestion_queue import QueuedMessage
 
 CORPORA_DIR = Path(__file__).resolve().parents[1] / "corpora"
@@ -35,11 +35,19 @@ async def ingest_corpus_files(
     worker_pool: asyncpg.Pool,
     object_storage: MinioObjectStorage,
     clamav_endpoint: tuple[str, int],
+    embedder: EmbeddingProviderPort,
     corpora_dir: Path = CORPORA_DIR,
 ) -> None:
     """Ingests each of a case's corpus files into ``workspace_id``,
     raising if any fails to reach ``ready`` — a golden case can't run
     meaningfully against a corpus fixture that didn't actually land.
+
+    ``embedder`` is required, not defaulted here: every real caller
+    builds it once via ``aether.embedding_selection.build_embedder``
+    and threads the *same* instance through both ingestion (here) and
+    query-time embedding, so the two can never silently mismatch — this
+    used to hardcode ``LocalHashEmbeddingAdapter`` directly, independent
+    of whatever embedder query-time retrieval was actually using.
 
     ``corpora_dir`` defaults to v1's own ``evals/corpora/`` (unchanged
     behavior for every existing caller) — Phase 5's v2 retrieval harness
@@ -53,6 +61,7 @@ async def ingest_corpus_files(
             worker_pool=worker_pool,
             object_storage=object_storage,
             clamav_endpoint=clamav_endpoint,
+            embedder=embedder,
             corpora_dir=corpora_dir,
         )
 
@@ -65,6 +74,7 @@ async def _ingest_one(
     worker_pool: asyncpg.Pool,
     object_storage: MinioObjectStorage,
     clamav_endpoint: tuple[str, int],
+    embedder: EmbeddingProviderPort,
     corpora_dir: Path = CORPORA_DIR,
 ) -> None:
     path = corpora_dir / filename
@@ -103,7 +113,7 @@ async def _ingest_one(
         object_storage=object_storage,
         scanner=ClamAvScanner(host=host, port=port),
         repository=PostgresIngestionRepository(worker_pool),
-        embedder=LocalHashEmbeddingAdapter(),
+        embedder=embedder,
     )
     await processor(
         QueuedMessage(

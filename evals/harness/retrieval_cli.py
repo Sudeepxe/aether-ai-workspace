@@ -27,6 +27,7 @@ import asyncpg
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.postgres.pool import _init_connection
 from aether.config import get_settings
+from aether.embedding_selection import build_embedder
 from evals.harness.retrieval_metrics import AggregateRetrievalMetrics, QueryMetrics, aggregate
 from evals.harness.retrieval_runner import (
     build_anchor_index,
@@ -44,9 +45,12 @@ def _fmt(v: float | None) -> str:
     return "n/a" if v is None else f"{v * 100:.1f}%"
 
 
-def _print_summary(agg: AggregateRetrievalMetrics, anchor_index: dict[str, list[UUID]]) -> None:
+def _print_summary(
+    agg: AggregateRetrievalMetrics, anchor_index: dict[str, list[UUID]], *, embedder_label: str
+) -> None:
     multi_match = {a: ids for a, ids in anchor_index.items() if len(ids) > 1}
     print("")
+    print(f"embedder: {embedder_label}")
     print(f"total queries: {agg.total_queries}")
     print(f"anchors resolving to >1 real chunk (legitimate chunking overlap): {len(multi_match)}")
     print("")
@@ -65,9 +69,14 @@ def _print_summary(agg: AggregateRetrievalMetrics, anchor_index: dict[str, list[
 
 
 def _write_report_json(
-    path: Path, *, per_query: list[QueryMetrics], agg: AggregateRetrievalMetrics
+    path: Path,
+    *,
+    per_query: list[QueryMetrics],
+    agg: AggregateRetrievalMetrics,
+    embedder_label: str,
 ) -> None:
     payload = {
+        "embedder": embedder_label,
         "per_query": [asdict(m) | {"case_class": m.case_class.value} for m in per_query],
         "aggregate": asdict(agg),
     }
@@ -108,6 +117,12 @@ async def _run(
     )
     clamav_endpoint = (settings.clamav_host, settings.clamav_port)
     workspace_id = new_eval_workspace_id()
+    # Built once here and threaded through both ingestion and query-time
+    # embedding below — the same instance, not just the same class, so
+    # the two can never silently diverge. Its own model/embedding_version
+    # is what gets printed/reported, never a hardcoded string.
+    embedder = build_embedder(settings)
+    print(f"embedder: {embedder.model} (embedding_version={embedder.embedding_version})")
 
     try:
         await ingest_v2_corpus(
@@ -117,6 +132,7 @@ async def _run(
             worker_pool=worker_pool,
             object_storage=object_storage,
             clamav_endpoint=clamav_endpoint,
+            embedder=embedder,
             log=print,
         )
         async with bootstrap_pool.acquire() as conn:
@@ -149,14 +165,16 @@ async def _run(
             db_pool=db_pool,
             anchor_index=anchor_index,
             refusal_threshold=settings.retrieval_refusal_threshold,
+            embedder=embedder,
         )
     finally:
         await bootstrap_pool.close()
         await worker_pool.close()
         await db_pool.close()
 
+    embedder_label = f"{embedder.model} (embedding_version={embedder.embedding_version})"
     agg = aggregate(per_query)
-    _print_summary(agg, anchor_index)
+    _print_summary(agg, anchor_index, embedder_label=embedder_label)
 
     if verbose:
         print("\n--- per-query detail ---")
@@ -170,7 +188,7 @@ async def _run(
             )
 
     if report_json is not None:
-        _write_report_json(report_json, per_query=per_query, agg=agg)
+        _write_report_json(report_json, per_query=per_query, agg=agg, embedder_label=embedder_label)
         print(f"\nwrote {report_json}")
 
     return 1 if unresolved else 0

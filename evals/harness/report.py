@@ -33,6 +33,7 @@ def render_report(
     case_metrics: list[CaseMetrics],
     faithfulness: list[FaithfulnessVerdict],
     generated_at: str,
+    embedder_label: str,
     golden_set_version: str = "v1",
 ) -> str:
     faithfulness_rate = _faithfulness_rate(faithfulness)
@@ -74,9 +75,9 @@ def render_report(
         "",
         f"**Generated:** {generated_at}",
         f"**Golden set:** {golden_set_version} ({len(case_metrics)} cases — {class_summary})",
-        "**Environment:** LocalHashEmbeddingAdapter (embedding_version=1) unless a real "
-        "OpenAI/Anthropic key is configured; EchoGenerator unless a real provider key is "
-        "configured.",
+        f"**Embedder:** {embedder_label} — read from this run's actual "
+        "aether.embedding_selection.build_embedder() selection, not assumed. "
+        "**Generator:** EchoGenerator unless a real LLM provider key is configured.",
         "",
         "## North Star (§1.7)",
         "",
