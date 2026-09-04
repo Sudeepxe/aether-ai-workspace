@@ -110,6 +110,15 @@ RLS_VIOLATION_TOTAL = Counter(
     "security invariant violation, should be exactly 0 in normal operation",
 )
 
+RETRIEVAL_VECTOR_DEGRADATION_TOTAL = Counter(
+    "aether_retrieval_vector_degradation_total",
+    "Hybrid retrieval's vector leg degrading to lexical-only (§3.2.5 "
+    "documented degraded mode), labeled by the underlying exception type — "
+    "should be near 0; a sustained non-zero rate means the vector search "
+    "backend itself needs attention, not that degraded mode is doing its job",
+    labelnames=("exception_type",),
+)
+
 API_KEY_AUTH_TOTAL = Counter(
     "aether_api_key_auth_total",
     "API-key authentication attempts (S10 #105, §7.6 anomaly monitoring: a spike in "

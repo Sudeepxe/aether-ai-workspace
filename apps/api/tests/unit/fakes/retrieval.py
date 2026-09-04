@@ -24,6 +24,11 @@ class FakeChunkSearch:
     ) -> list[ChunkSearchResult]:
         self.vector_calls.append((workspace_id, embedding, limit))
         if self._vector_error is not None:
+            # A real adapter only ever raises ChunkSearchUnavailableError
+            # for an expected infra failure (see adapters/postgres/
+            # chunk_search.py's translation) — any other exception a
+            # caller passes here is deliberately used by tests to prove
+            # HybridSearch does NOT swallow it.
             raise self._vector_error
         return self._vector_results[:limit]
 

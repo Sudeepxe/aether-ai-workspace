@@ -5,7 +5,8 @@ from uuid import uuid4
 import pytest
 
 from aether.app.retrieval.hybrid_search import _RRF_CONSTANT, HybridSearch
-from aether.ports.retrieval import ChunkSearchResult
+from aether.observability.metrics import RETRIEVAL_VECTOR_DEGRADATION_TOTAL
+from aether.ports.retrieval import ChunkSearchResult, ChunkSearchUnavailableError
 from tests.unit.fakes.retrieval import FakeChunkSearch, FakeQueryEmbedder
 
 pytestmark = pytest.mark.unit
@@ -85,17 +86,75 @@ async def test_mmr_prefers_a_diverse_chunk_over_a_near_duplicate_of_an_already_s
     assert "near-dup-of-top" not in sections
 
 
-async def test_vector_leg_failure_sets_degraded_and_falls_back_to_lexical_only() -> None:
+async def test_vector_leg_infra_failure_sets_degraded_and_falls_back_to_lexical_only() -> None:
+    """ChunkSearchUnavailableError is the one exception type a real
+    adapter raises for an expected infra failure (connection lost,
+    timeout, index unavailable — see adapters/postgres/chunk_search.py's
+    translation) — HybridSearch must degrade gracefully on exactly this,
+    never on an arbitrary exception (see the propagation test below)."""
     lexical_hit = _result(section="lexical", embedding=[1.0, 0.0, 0.0, 0.0])
     chunk_search = FakeChunkSearch(
-        lexical_results=[lexical_hit], vector_error=ConnectionError("index unreachable")
+        lexical_results=[lexical_hit],
+        vector_error=ChunkSearchUnavailableError("index unreachable"),
     )
     search = HybridSearch(chunk_search=chunk_search, embedder=FakeQueryEmbedder())
+
+    before = RETRIEVAL_VECTOR_DEGRADATION_TOTAL.labels(
+        exception_type="ChunkSearchUnavailableError"
+    )._value.get()
 
     result = await search.search(uuid4(), query="q", k=4)
 
     assert result.degraded is True
     assert [c.section_path for c in result.chunks] == ["lexical"]
+    after = RETRIEVAL_VECTOR_DEGRADATION_TOTAL.labels(
+        exception_type="ChunkSearchUnavailableError"
+    )._value.get()
+    assert after == before + 1
+
+
+async def test_vector_leg_infra_failure_reports_the_wrapped_adapter_exception_type() -> None:
+    """The degradation metric/log must carry the *underlying* adapter
+    exception type (e.g. "PostgresConnectionError"), not the generic
+    "ChunkSearchUnavailableError" wrapper every failure shares — that's
+    the whole point of the signal: telling a connection failure apart
+    from a timeout apart from an unavailable index at a glance."""
+    chunk_search = FakeChunkSearch(
+        vector_error=_unavailable_wrapping(
+            RuntimeError("simulated asyncpg.PostgresConnectionError")
+        )
+    )
+    search = HybridSearch(chunk_search=chunk_search, embedder=FakeQueryEmbedder())
+
+    before = RETRIEVAL_VECTOR_DEGRADATION_TOTAL.labels(exception_type="RuntimeError")._value.get()
+
+    result = await search.search(uuid4(), query="q", k=4)
+
+    assert result.degraded is True
+    after = RETRIEVAL_VECTOR_DEGRADATION_TOTAL.labels(exception_type="RuntimeError")._value.get()
+    assert after == before + 1
+
+
+def _unavailable_wrapping(cause: Exception) -> ChunkSearchUnavailableError:
+    """Builds a ChunkSearchUnavailableError with __cause__ set, the same
+    shape `raise ChunkSearchUnavailableError(...) from exc` produces in
+    the real adapter — Python only sets __cause__ via `raise ... from`,
+    not the constructor, so a plain instantiation in a test fixture
+    needs this to be a faithful stand-in."""
+    error = ChunkSearchUnavailableError(f"vector search unavailable: {cause}")
+    error.__cause__ = cause
+    return error
+
+
+async def test_unexpected_exception_from_the_vector_leg_propagates_not_swallowed() -> None:
+    """A programming error (anything other than ChunkSearchUnavailableError)
+    must never be treated as 'expected infra failure' — that would hide a
+    real bug behind a confusing degraded-but-successful response."""
+    chunk_search = FakeChunkSearch(vector_error=NameError("bug: undefined variable"))
+    search = HybridSearch(chunk_search=chunk_search, embedder=FakeQueryEmbedder())
+
+    with pytest.raises(NameError):
+        await search.search(uuid4(), query="q", k=4)
 
 
 async def test_k_bounds_the_number_of_returned_chunks() -> None:

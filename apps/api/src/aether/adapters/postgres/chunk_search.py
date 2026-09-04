@@ -25,7 +25,34 @@ from uuid import UUID
 
 import asyncpg
 
-from aether.ports.retrieval import ChunkSearchResult
+from aether.ports.retrieval import ChunkSearchResult, ChunkSearchUnavailableError
+
+# The three "expected infrastructure failure" categories ChunkSearchPort's
+# docstring names (connection errors, timeouts, index unavailable), backed
+# by real asyncpg/Postgres exception classes rather than a blanket
+# `except Exception` — verified against asyncpg's own source and Postgres's
+# SQLSTATE classes, not guessed:
+#   - ConnectionError / asyncpg.PostgresConnectionError: transport-level
+#     connection loss/refusal, both the builtin socket-layer form and
+#     asyncpg's server-reported equivalents (ConnectionDoesNotExistError,
+#     ConnectionFailureError, ...).
+#   - TimeoutError / asyncpg.QueryCanceledError: an asyncio-level timeout
+#     (e.g. pool.acquire()) or a Postgres statement_timeout firing
+#     mid-query (SQLSTATE 57014).
+#   - asyncpg.ObjectNotInPrerequisiteStateError (SQLSTATE class 55, e.g.
+#     LockNotAvailableError): the index isn't in a usable state right now
+#     (mid-rebuild, locked).
+# Deliberately excludes asyncpg.InterfaceError — every real raise site for
+# that in asyncpg is client-side misuse (a closed connection reused, an
+# operation issued out of order), i.e. a bug in *our* calling code, which
+# must propagate rather than silently degrade.
+_EXPECTED_VECTOR_LEG_FAILURES: tuple[type[Exception], ...] = (
+    ConnectionError,
+    TimeoutError,
+    asyncpg.PostgresConnectionError,
+    asyncpg.QueryCanceledError,
+    asyncpg.ObjectNotInPrerequisiteStateError,
+)
 
 
 class PostgresChunkSearch:
@@ -35,22 +62,25 @@ class PostgresChunkSearch:
     async def search_vector(
         self, workspace_id: UUID, *, embedding: list[float], limit: int
     ) -> list[ChunkSearchResult]:
-        rows = await self._conn.fetch(
-            """
-            SELECT c.id, c.document_id, d.filename AS document_title, c.section_path,
-                   c.page_start, c.page_end, c.content, c.embedding,
-                   1 - (c.embedding <=> $1) AS score
-            FROM chunks c
-            JOIN documents d ON d.id = c.document_id
-            WHERE c.workspace_id = $2 AND c.embedding IS NOT NULL
-              AND d.status = 'ready' AND d.deleted_at IS NULL
-            ORDER BY c.embedding <=> $1
-            LIMIT $3
-            """,
-            embedding,
-            workspace_id,
-            limit,
-        )
+        try:
+            rows = await self._conn.fetch(
+                """
+                SELECT c.id, c.document_id, d.filename AS document_title, c.section_path,
+                       c.page_start, c.page_end, c.content, c.embedding,
+                       1 - (c.embedding <=> $1) AS score
+                FROM chunks c
+                JOIN documents d ON d.id = c.document_id
+                WHERE c.workspace_id = $2 AND c.embedding IS NOT NULL
+                  AND d.status = 'ready' AND d.deleted_at IS NULL
+                ORDER BY c.embedding <=> $1
+                LIMIT $3
+                """,
+                embedding,
+                workspace_id,
+                limit,
+            )
+        except _EXPECTED_VECTOR_LEG_FAILURES as exc:
+            raise ChunkSearchUnavailableError(f"vector search unavailable: {exc}") from exc
         return [_row_to_result(row) for row in rows]
 
     async def search_lexical(
@@ -83,11 +113,22 @@ class PooledChunkSearch:
     async def search_vector(
         self, workspace_id: UUID, *, embedding: list[float], limit: int
     ) -> list[ChunkSearchResult]:
-        async with self._pool.acquire() as conn, conn.transaction():
-            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(workspace_id))
-            return await PostgresChunkSearch(conn).search_vector(
-                workspace_id, embedding=embedding, limit=limit
-            )
+        # Wrapped here too, not just in PostgresChunkSearch.search_vector:
+        # pool.acquire()/set_config can themselves fail on the same
+        # connection/timeout categories before ever reaching the inner
+        # call, and ChunkSearchUnavailableError raised by the inner call
+        # simply isn't a member of _EXPECTED_VECTOR_LEG_FAILURES, so it
+        # passes through this except clause unchanged — no double-wrap.
+        try:
+            async with self._pool.acquire() as conn, conn.transaction():
+                await conn.execute(
+                    "SELECT set_config('app.tenant_id', $1, true)", str(workspace_id)
+                )
+                return await PostgresChunkSearch(conn).search_vector(
+                    workspace_id, embedding=embedding, limit=limit
+                )
+        except _EXPECTED_VECTOR_LEG_FAILURES as exc:
+            raise ChunkSearchUnavailableError(f"vector search unavailable: {exc}") from exc
 
     async def search_lexical(
         self, workspace_id: UUID, *, query: str, limit: int

@@ -19,8 +19,13 @@ import math
 from dataclasses import dataclass
 from uuid import UUID
 
+import structlog
+
+from aether.observability.metrics import RETRIEVAL_VECTOR_DEGRADATION_TOTAL
 from aether.ports.embedding import EmbeddingProviderPort
-from aether.ports.retrieval import ChunkSearchPort, ChunkSearchResult
+from aether.ports.retrieval import ChunkSearchPort, ChunkSearchResult, ChunkSearchUnavailableError
+
+log = structlog.get_logger(__name__)
 
 _VECTOR_LEG_LIMIT = 20
 _LEXICAL_LEG_LIMIT = 20
@@ -82,10 +87,20 @@ class HybridSearch:
             vector_results = await self._chunk_search.search_vector(
                 workspace_id, embedding=query_embedding, limit=_VECTOR_LEG_LIMIT
             )
-        except Exception:
-            # §3.2.5's documented degraded mode: a vector-index failure
-            # falls back to lexical-only rather than failing the whole
-            # retrieval (and, transitively, the chat turn).
+        except ChunkSearchUnavailableError as exc:
+            # §3.2.5's documented degraded mode: an *expected*
+            # infrastructure failure (connection lost, statement timeout,
+            # index unavailable — ChunkSearchUnavailableError's exact
+            # contract, see ports/retrieval.py) falls back to
+            # lexical-only rather than failing the whole retrieval (and,
+            # transitively, the chat turn). Anything else — a programming
+            # error in our own code — is deliberately NOT caught here and
+            # propagates, since silently degrading on a bug would hide it
+            # behind a confusing "degraded" response instead of a loud
+            # failure.
+            exception_type = type(exc.__cause__ or exc).__name__
+            log.warning("vector_search_degraded_to_lexical_only", exception_type=exception_type)
+            RETRIEVAL_VECTOR_DEGRADATION_TOTAL.labels(exception_type=exception_type).inc()
             vector_results = []
             degraded = True
 
