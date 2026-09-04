@@ -317,13 +317,17 @@ async def test_no_context_uses_the_plain_system_prompt() -> None:
     assert system_message.content == "You are Aether, a helpful AI assistant."
 
 
-async def test_grounded_context_switches_to_the_grounded_system_prompt_with_the_context_inlined() -> (
-    None
-):
+async def test_grounded_system_prompt_states_the_protocol_but_never_carries_chunk_content() -> None:
     """ADR-6.4's Gate 2: the grounded system prompt mandates answering
-    only from context and gives the exact refusal wording — the
-    context text itself must actually be in the prompt the provider
-    receives, not just referenced."""
+    only from context and gives the exact refusal wording — but per
+    Phase 3's remediation (docs/REMEDIATION_PLAN.md), the system prompt
+    is now fixed, our-own-text-only: it must NEVER contain retrieved
+    chunk content. See the companion test below for where the context
+    actually goes (the final user message, inside an explicit envelope)
+    — that split is the whole point of the fix, so both halves of the
+    contract get their own assertion rather than one loose "prompt
+    contains X" check that could pass even if content leaked into the
+    wrong message."""
     provider = FakeProviderAdapter(name="fake", chunks=["ok"])
     router, _ = _router(providers={"fake": provider}, model_chain=[("fake", "fake-model")])
     context = RetrievedContext(
@@ -347,8 +351,47 @@ async def test_grounded_context_switches_to_the_grounded_system_prompt_with_the_
     assert (
         "don't have information about that in the knowledge base" in system_message.content.lower()
     )
-    assert "Acme's pricing starts at $10/mo." in system_message.content
-    assert "pricing.md" in system_message.content
+    assert "Acme's pricing starts at $10/mo." not in system_message.content
+    assert "pricing.md" not in system_message.content
+
+
+async def test_grounded_context_is_delivered_in_the_final_user_message_inside_the_envelope() -> (
+    None
+):
+    """The other half of the Phase 3 contract: retrieved content lives
+    in the final user-role message, wrapped in the explicit
+    <<<AETHER_RETRIEVED_CONTEXT>>> envelope, never as a separate message
+    list entry (that would break Anthropic's strict role-alternation —
+    see router.py's module comment) and never in the system prompt."""
+    provider = FakeProviderAdapter(name="fake", chunks=["ok"])
+    router, _ = _router(providers={"fake": provider}, model_chain=[("fake", "fake-model")])
+    context = RetrievedContext(
+        chunks=[
+            RetrievedContextChunk(
+                content="Acme's pricing starts at $10/mo.",
+                document_title="pricing.md",
+                section_path="Pricing",
+            )
+        ]
+    )
+
+    async for _ in router.generate(
+        thread_history=[], user_content="what does it cost?", context=context
+    ):
+        pass
+
+    messages = provider.calls[0].messages
+    assert len(messages) == 2  # system, final user — no extra message entry
+    final_user_message = messages[-1]
+    assert "<<<AETHER_RETRIEVED_CONTEXT>>>" in final_user_message.content
+    assert "<<<END_AETHER_RETRIEVED_CONTEXT>>>" in final_user_message.content
+    assert "Acme's pricing starts at $10/mo." in final_user_message.content
+    assert "pricing.md" in final_user_message.content
+    # The envelope must close before the user's actual question appears,
+    # and the question itself must still be present verbatim.
+    assert final_user_message.content.index(
+        "<<<END_AETHER_RETRIEVED_CONTEXT>>>"
+    ) < final_user_message.content.index("what does it cost?")
 
 
 async def test_memory_summary_is_appended_to_the_system_prompt_when_present() -> None:
