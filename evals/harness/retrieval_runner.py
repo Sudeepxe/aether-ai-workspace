@@ -17,9 +17,9 @@ from uuid import UUID
 
 import asyncpg
 
-from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.postgres.chunk_search import PooledChunkSearch
 from aether.app.retrieval.hybrid_search import HybridSearch
+from aether.ports.embedding import EmbeddingProviderPort
 from evals.harness.corpus import ingest_corpus_files
 from evals.harness.retrieval_metrics import QueryMetrics, RankedResult, score_query
 from evals.harness.retrieval_schema import GoldenQuery
@@ -39,6 +39,7 @@ async def ingest_v2_corpus(
     worker_pool: asyncpg.Pool,
     object_storage: Any,
     clamav_endpoint: tuple[str, int],
+    embedder: EmbeddingProviderPort,
     log: Any = None,
 ) -> None:
     """Ingests every .md file under corpora_dir into one shared
@@ -46,7 +47,9 @@ async def ingest_v2_corpus(
     golden set, not per-query isolation like v1's per-case workspaces:
     near-miss and unanswerable_populated queries specifically need to
     see the real, full, competing corpus, not an artificially narrowed
-    one."""
+    one. ``embedder`` must be the same instance run_retrieval_eval uses
+    for query-time embedding below — see corpus.py's ingest_corpus_files
+    docstring for why that's required, not optional."""
     filenames = sorted(p.name for p in corpora_dir.glob("*.md"))
     if not filenames:
         raise RuntimeError(f"no corpus files found under {corpora_dir}")
@@ -65,6 +68,7 @@ async def ingest_v2_corpus(
             worker_pool=worker_pool,
             object_storage=object_storage,
             clamav_endpoint=clamav_endpoint,
+            embedder=embedder,
             corpora_dir=corpora_dir,
         )
         if log is not None:
@@ -108,14 +112,16 @@ async def run_retrieval_eval(
     db_pool: asyncpg.Pool,
     anchor_index: dict[str, list[UUID]],
     refusal_threshold: float,
+    embedder: EmbeddingProviderPort,
 ) -> list[QueryMetrics]:
     """Runs every golden query directly through a real HybridSearch
-    instance (real PooledChunkSearch against Postgres, real RRF/MMR,
-    the real LocalHashEmbeddingAdapter this dev environment actually
-    uses — no provider key is configured here, so this measures the
-    real pipeline honestly, not a semantic embedding model's quality)."""
+    instance (real PooledChunkSearch against Postgres, real RRF/MMR).
+    ``embedder`` must be the exact same instance ingest_v2_corpus used —
+    query-time and ingestion-time embeddings from two different
+    adapters would be meaningless to compare. Whatever this run's
+    embedder actually is (read from ``embedder.model``, never assumed)
+    is what the caller must report alongside these numbers."""
     chunk_search = PooledChunkSearch(db_pool)
-    embedder = LocalHashEmbeddingAdapter()
     hybrid_search = HybridSearch(chunk_search=chunk_search, embedder=embedder)
 
     results = []

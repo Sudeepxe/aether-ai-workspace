@@ -35,6 +35,7 @@ from httpx import ASGITransport, AsyncClient
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.postgres.pool import _init_connection
 from aether.config import get_settings
+from aether.embedding_selection import build_embedder
 from evals.harness.judge import FaithfulnessStatus, FaithfulnessVerdict, judge_case_faithfulness
 from evals.harness.metrics import AggregateMetrics, CaseMetrics, aggregate, score_case
 from evals.harness.report import render_report
@@ -45,11 +46,14 @@ DEFAULT_GOLDEN_DIR = Path(__file__).resolve().parents[1] / "golden" / "v1"
 _REQUIRED_RATE = 1.0
 
 
-def _print_summary(agg: AggregateMetrics, faithfulness: list[FaithfulnessVerdict]) -> None:
+def _print_summary(
+    agg: AggregateMetrics, faithfulness: list[FaithfulnessVerdict], *, embedder_label: str
+) -> None:
     def fmt(v: float | None) -> str:
         return "n/a" if v is None else f"{v * 100:.1f}%"
 
     print("")
+    print(f"embedder: {embedder_label}")
     print(f"cases: {agg.cases_ran_successfully}/{agg.total_cases} ran successfully")
     print(f"refusal correctness:   {fmt(agg.refusal_correctness_rate)}")
     print(f"retrieval hit rate:    {fmt(agg.retrieval_hit_rate)}")
@@ -129,6 +133,13 @@ async def _run(golden_dir: Path, report_json: Path | None, report_md: Path | Non
         bucket=settings.object_storage_bucket,
     )
     clamav_endpoint = (settings.clamav_host, settings.clamav_port)
+    # Built once, here, from the same Settings the real app's own
+    # composition root reads — so ingestion (this instance) and
+    # query-time embedding (the real app's own build_embedder call
+    # inside create_app(), same settings singleton) can never silently
+    # diverge. Its own model/embedding_version, not a hardcoded string,
+    # is what _print_summary/render_report actually report below.
+    embedder = build_embedder(settings)
 
     try:
         from aether.http.app import create_app
@@ -147,6 +158,7 @@ async def _run(golden_dir: Path, report_json: Path | None, report_md: Path | Non
                 worker_pool=worker_pool,
                 object_storage=object_storage,
                 clamav_endpoint=clamav_endpoint,
+                embedder=embedder,
                 log=print,
             )
             faithfulness: list[FaithfulnessVerdict] = []
@@ -160,9 +172,10 @@ async def _run(golden_dir: Path, report_json: Path | None, report_md: Path | Non
         await bootstrap_pool.close()
         await worker_pool.close()
 
+    embedder_label = f"{embedder.model} (embedding_version={embedder.embedding_version})"
     case_metrics = [score_case(r) for r in results]
     agg = aggregate(case_metrics)
-    _print_summary(agg, faithfulness)
+    _print_summary(agg, faithfulness, embedder_label=embedder_label)
     if report_json is not None:
         _write_report_json(
             report_json, case_metrics=case_metrics, agg=agg, faithfulness=faithfulness
@@ -175,6 +188,7 @@ async def _run(golden_dir: Path, report_json: Path | None, report_md: Path | Non
                 case_metrics=case_metrics,
                 faithfulness=faithfulness,
                 generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+                embedder_label=embedder_label,
             )
         )
         print(f"wrote {report_md}")

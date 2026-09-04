@@ -3,9 +3,12 @@ data-driven derivation from the golden set's actual retrieval score
 distribution. No LLM judge needed: this is pure statistics over real
 hybrid-retrieval output.
 
-Honest scope (documented here, not hidden): this environment's embedder
-is ``LocalHashEmbeddingAdapter`` (non-semantic, hash-based) — the
-calibrated threshold below is correct *for this embedder*, not a
+Honest scope (documented here, not hidden): the embedder is whatever
+``aether.embedding_selection.build_embedder`` selects for the running
+environment (as of this writing, no ``AETHER_OPENAI_API_KEY`` is
+configured anywhere this has been run, so that's ``LocalHashEmbeddingAdapter``
+— non-semantic, hash-based) — the calibrated threshold below is correct
+*for that specific embedder*, printed alongside the result below, not a
 universal constant. ADR-6.4 anticipates exactly this: "threshold is a
 calibrated artifact versioned alongside embedding_version, recalibrated
 as part of the... embedding migration procedure." A real embedding
@@ -33,12 +36,13 @@ from pathlib import Path
 
 import asyncpg
 
-from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.postgres.chunk_search import PooledChunkSearch
 from aether.adapters.postgres.pool import _init_connection
 from aether.app.retrieval.hybrid_search import HybridSearch
 from aether.config import get_settings
+from aether.embedding_selection import build_embedder
+from aether.ports.embedding import EmbeddingProviderPort
 from evals.harness.corpus import ingest_corpus_files
 from evals.harness.schema import GoldenCase, load_golden_set
 
@@ -65,14 +69,13 @@ async def _collect_positive_scores(
     worker_pool: asyncpg.Pool,
     object_storage: MinioObjectStorage,
     clamav_endpoint: tuple[str, int],
+    embedder: EmbeddingProviderPort,
 ) -> list[CalibrationSample]:
     """One real fused RRF top-score per turn expected to ground — a
     fresh ingested workspace per case, direct HybridSearch call (not
     through the chat HTTP surface, which doesn't expose the raw score at
     all — only the boolean Gate 1 outcome)."""
-    hybrid_search = HybridSearch(
-        chunk_search=PooledChunkSearch(bootstrap_pool), embedder=LocalHashEmbeddingAdapter()
-    )
+    hybrid_search = HybridSearch(chunk_search=PooledChunkSearch(bootstrap_pool), embedder=embedder)
     samples: list[CalibrationSample] = []
     for case in cases:
         if not case.corpus_files:
@@ -92,6 +95,7 @@ async def _collect_positive_scores(
             worker_pool=worker_pool,
             object_storage=object_storage,
             clamav_endpoint=clamav_endpoint,
+            embedder=embedder,
         )
         for turn in case.turns:
             if not turn.expect_grounded:
@@ -130,6 +134,7 @@ async def _main() -> None:
         bucket=settings.object_storage_bucket,
     )
     clamav_endpoint = (settings.clamav_host, settings.clamav_port)
+    embedder = build_embedder(settings)
 
     try:
         samples = await _collect_positive_scores(
@@ -138,6 +143,7 @@ async def _main() -> None:
             worker_pool=worker_pool,
             object_storage=object_storage,
             clamav_endpoint=clamav_endpoint,
+            embedder=embedder,
         )
     finally:
         await bootstrap_pool.close()
@@ -145,9 +151,7 @@ async def _main() -> None:
 
     scores = sorted(s.top_score for s in samples)
     threshold = derive_threshold(samples)
-    print(
-        f"embedder: {LocalHashEmbeddingAdapter.model} (embedding_version={LocalHashEmbeddingAdapter.embedding_version})"
-    )
+    print(f"embedder: {embedder.model} (embedding_version={embedder.embedding_version})")
     print(f"positive samples: {len(samples)}")
     print(
         f"score range: min={scores[0]:.4f} max={scores[-1]:.4f} mean={sum(scores) / len(scores):.4f}"

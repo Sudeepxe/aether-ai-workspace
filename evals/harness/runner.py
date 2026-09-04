@@ -18,6 +18,7 @@ from typing import Any
 import asyncpg
 import httpx
 
+from aether.ports.embedding import EmbeddingProviderPort
 from evals.harness.corpus import ingest_corpus_files
 from evals.harness.schema import GoldenCase
 
@@ -93,6 +94,7 @@ async def run_case(
     worker_pool: asyncpg.Pool,
     object_storage: Any,
     clamav_endpoint: tuple[str, int],
+    embedder: EmbeddingProviderPort,
 ) -> CaseResult:
     try:
         ws_resp = await client.post("/v1/workspaces", json={"name": case.id}, headers=headers)
@@ -110,6 +112,7 @@ async def run_case(
                 worker_pool=worker_pool,
                 object_storage=object_storage,
                 clamav_endpoint=clamav_endpoint,
+                embedder=embedder,
             )
 
         turn_results: list[TurnResult] = []
@@ -149,6 +152,7 @@ async def run_golden_set(
     worker_pool: asyncpg.Pool,
     object_storage: Any,
     clamav_endpoint: tuple[str, int],
+    embedder: EmbeddingProviderPort,
     log: Any = None,
 ) -> list[CaseResult]:
     headers = await register_harness_user(client)
@@ -163,6 +167,7 @@ async def run_golden_set(
             worker_pool=worker_pool,
             object_storage=object_storage,
             clamav_endpoint=clamav_endpoint,
+            embedder=embedder,
         )
         results.append(result)
         if log is not None:
