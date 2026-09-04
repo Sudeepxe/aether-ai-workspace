@@ -1,0 +1,559 @@
+[
+  {
+    "id": "answerable-01-access-token-expiry",
+    "case_class": "answerable",
+    "query": "How long is an Aether access token valid before it expires?",
+    "relevant_chunks": [
+      {
+        "anchor": "This short lifetime is a deliberate blast-radius decision",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-02-refresh-reuse-consequence",
+    "case_class": "answerable",
+    "query": "What does Aether do when a refresh token is presented a second time after it was already used?",
+    "relevant_chunks": [
+      {
+        "anchor": "revokes the entire family of sessions descended from that original refresh token",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-03-api-key-environment-prefix",
+    "case_class": "answerable",
+    "query": "How can you tell a development API key apart from a production one just by looking at it?",
+    "relevant_chunks": [
+      {
+        "anchor": "carries a prefix that encodes which environment it was issued in",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-04-enumeration-safety",
+    "case_class": "answerable",
+    "query": "Does a failed login attempt reveal whether the email address even has an account?",
+    "relevant_chunks": [
+      {
+        "anchor": "collapses several distinct failure reasons into one identical, indistinguishable error response",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-05-key-rotation-overlap",
+    "case_class": "answerable",
+    "query": "During a signing-key rotation, how long does the previous key stay valid for verification?",
+    "relevant_chunks": [
+      {
+        "anchor": "Outside of an active rotation window, only a single signing key is configured at all",
+        "grade": "primary"
+      },
+      {
+        "anchor": "This overlap window means a signing-key rotation never has to forcibly invalidate",
+        "grade": "supporting"
+      }
+    ]
+  },
+  {
+    "id": "answerable-06-multiple-valid-keys",
+    "case_class": "answerable",
+    "query": "How does Aether know which signing key to check a JWT's signature against if more than one key is valid at once?",
+    "relevant_chunks": [
+      {
+        "anchor": "the verifying side always knows exactly which key to check a given token's signature against even if multiple keys are valid at once",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-07-first-api-key-use",
+    "case_class": "answerable",
+    "query": "What's notable about the very first successful use of a brand new API key?",
+    "relevant_chunks": [
+      {
+        "anchor": "the very first successful use of a brand new key, are both the kind of volume and novelty signals",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-08-malware-scan-outcome",
+    "case_class": "answerable",
+    "query": "What happens to a document that fails Aether's malware scan?",
+    "relevant_chunks": [
+      {
+        "anchor": "immediately marked as rejected and never proceeds to chunking or embedding",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-09-hash-embedding-fallback",
+    "case_class": "answerable",
+    "query": "What does Aether use to embed chunks when no real embedding provider key is configured?",
+    "relevant_chunks": [
+      {
+        "anchor": "falls back to a local, deterministic, hash-based embedding scheme",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-10-dead-letter-state",
+    "case_class": "answerable",
+    "query": "What happens to an outbox message that keeps failing and exhausts its delivery attempts?",
+    "relevant_chunks": [
+      {
+        "anchor": "moved into a dead-letter state rather than being retried forever",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-11-failed-documents-visible",
+    "case_class": "answerable",
+    "query": "Can a workspace see documents that failed to ingest when it lists its documents?",
+    "relevant_chunks": [
+      {
+        "anchor": "includes documents that have failed processing as well as ones still in progress",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-12-upload-size-ceiling",
+    "case_class": "answerable",
+    "query": "What determines the maximum size Aether will accept for a document upload?",
+    "relevant_chunks": [
+      {
+        "anchor": "issued with an explicit maximum size baked in at the moment it is created",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-13-single-chunk-document",
+    "case_class": "answerable",
+    "query": "What kind of document ends up retrievable only as a single, undifferentiated chunk?",
+    "relevant_chunks": [
+      {
+        "anchor": "a document that produces only one chunk because it was too short will only ever be retrievable as a single, undifferentiated unit",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-14-provider-order",
+    "case_class": "answerable",
+    "query": "In what order does the LLM router try configured providers?",
+    "relevant_chunks": [
+      {
+        "anchor": "OpenAI first if configured, then Anthropic, then Groq",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-15-breaker-failure-count",
+    "case_class": "answerable",
+    "query": "How many consecutive failures does it take before a provider's circuit breaker opens?",
+    "relevant_chunks": [
+      {
+        "anchor": "After three consecutive failures against that specific provider, its breaker opens",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-16-breaker-cooldown",
+    "case_class": "answerable",
+    "query": "How long does a provider's circuit breaker stay open before it tries a test call again?",
+    "relevant_chunks": [
+      {
+        "anchor": "after a cooldown period of thirty seconds it transitions to a half-open state",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-17-no-mid-stream-retry",
+    "case_class": "answerable",
+    "query": "Can the router retry a different provider after it has already started streaming a reply to the client?",
+    "relevant_chunks": [
+      {
+        "anchor": "Once even one token has reached the client, a mid-stream failure from that provider is surfaced as a real, hard error",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-18-unrecognized-model-startup-error",
+    "case_class": "answerable",
+    "query": "What happens if a provider is configured with a model name that's absent from that provider's own capability registry?",
+    "relevant_chunks": [
+      {
+        "anchor": "treated as a startup-time configuration error rather than something silently tolerated at request time",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-19-concurrency-semaphore-duration",
+    "case_class": "answerable",
+    "query": "For how long does Aether hold the concurrency limit against a provider during one generation?",
+    "relevant_chunks": [
+      {
+        "anchor": "held for the entire duration of a streaming generation, not just for the moment the request is issued",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-20-per-model-pricing",
+    "case_class": "answerable",
+    "query": "Why does each provider adapter report its own per-model cost figures instead of one shared price?",
+    "relevant_chunks": [
+      {
+        "anchor": "applying one provider's price to every model it could possibly serve would produce a plausible but wrong number",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-21-rrf-constant",
+    "case_class": "answerable",
+    "query": "What constant does Aether add to the rank position when fusing the vector and lexical leg rankings?",
+    "relevant_chunks": [
+      {
+        "anchor": "The constant added to the rank before dividing is set to sixty",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-22-mmr-weight",
+    "case_class": "answerable",
+    "query": "What weighting does MMR use to balance relevance against diversity when selecting chunks?",
+    "relevant_chunks": [
+      {
+        "anchor": "The balance between the two signals is controlled by a weighting constant set to one half",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-23-missing-embedding-diversity",
+    "case_class": "answerable",
+    "query": "How does MMR treat a chunk that arrived only through the lexical leg and has no embedding yet?",
+    "relevant_chunks": [
+      {
+        "anchor": "treated as maximally diverse from everything else rather than excluded",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-24-two-gate-protocol",
+    "case_class": "answerable",
+    "query": "What are Gate One and Gate Two in Aether's grounded refusal protocol?",
+    "relevant_chunks": [
+      {
+        "anchor": "Gate One runs immediately after retrieval and before any call to a language model",
+        "grade": "primary"
+      },
+      {
+        "anchor": "Gate Two is enforced by the system prompt handed to the language model",
+        "grade": "supporting"
+      }
+    ]
+  },
+  {
+    "id": "answerable-25-threshold-calibration-method",
+    "case_class": "answerable",
+    "query": "How was Aether's retrieval refusal threshold actually calibrated?",
+    "relevant_chunks": [
+      {
+        "anchor": "setting the threshold to half of the weakest observed score among those genuine positive matches",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-26-degraded-mode-triggers",
+    "case_class": "answerable",
+    "query": "What kinds of failures cause hybrid search to fall back to lexical-only results?",
+    "relevant_chunks": [
+      {
+        "anchor": "a lost connection, a query that exceeds its timeout, or an index that is temporarily unavailable while being rebuilt",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-27-last-owner-protection",
+    "case_class": "answerable",
+    "query": "What does Aether do if removing a member would leave a workspace with no Owners at all?",
+    "relevant_chunks": [
+      {
+        "anchor": "actively refuses any action \u2014 removing a member, downgrading a role, or leaving a workspace \u2014 that would leave a workspace with zero remaining Owners",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-28-rls-session-config",
+    "case_class": "answerable",
+    "query": "How does Postgres row-level security know which workspace a request is scoped to?",
+    "relevant_chunks": [
+      {
+        "anchor": "the connection handling a request sets a session-local configuration value identifying which workspace the current request is scoped to",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-29-soft-limit-purpose",
+    "case_class": "answerable",
+    "query": "What is the purpose of a workspace budget's soft-limit percentage?",
+    "relevant_chunks": [
+      {
+        "anchor": "does not block any requests by itself; it exists purely as a threshold for surfacing a warning",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-30-budget-reset-manual-action",
+    "case_class": "answerable",
+    "query": "Does resetting a workspace's monthly budget require any action from an administrator?",
+    "relevant_chunks": [
+      {
+        "anchor": "without any manual intervention or explicit reset action required from an administrator",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-31-rls-violation-expected-value",
+    "case_class": "answerable",
+    "query": "What is the expected, healthy value of Aether's row-level-security violation metric?",
+    "relevant_chunks": [
+      {
+        "anchor": "this metric's expected value in correct operation is exactly zero at all times",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-32-tracing-sample-ratio",
+    "case_class": "answerable",
+    "query": "What percentage of requests does Aether trace by default?",
+    "relevant_chunks": [
+      {
+        "anchor": "at least ten percent of requests are traced",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-33-no-collector-tracing-fallback",
+    "case_class": "answerable",
+    "query": "What happens to tracing when no trace collector endpoint is configured?",
+    "relevant_chunks": [
+      {
+        "anchor": "falls back to a genuine no-op rather than silently buffering spans that go nowhere",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-34-audit-log-events",
+    "case_class": "answerable",
+    "query": "What kinds of actions produce an entry in Aether's audit log?",
+    "relevant_chunks": [
+      {
+        "anchor": "a membership role change, a workspace deletion request, an API key being created or revoked",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "answerable-35-slo-tier-topology",
+    "case_class": "answerable",
+    "query": "What SLO tier does Aether's demo deployment topology commit to?",
+    "relevant_chunks": [
+      {
+        "anchor": "explicitly a single-node topology rather than a highly available one, and it is held to a corresponding service level objective tier",
+        "grade": "primary"
+      }
+    ]
+  },
+  {
+    "id": "near-miss-01-outbox-retry-forever",
+    "case_class": "near_miss",
+    "query": "If document processing keeps failing, does Aether keep retrying the outbox message forever?",
+    "relevant_chunks": [
+      {
+        "anchor": "moved into a dead-letter state rather than being retried forever",
+        "grade": "primary"
+      }
+    ],
+    "distractor_anchor": "Once even one token has reached the client, a mid-stream failure from that provider is surfaced as a real, hard error",
+    "notes": "Real answer is ingestion's outbox dead-letter behavior. The router's retry-before-first-token rule is a genuinely different retry policy in a different subsystem, but shares enough retry/fallback vocabulary to be a real lexical-leg distractor."
+  },
+  {
+    "id": "near-miss-02-router-mid-stream-retry",
+    "case_class": "near_miss",
+    "query": "Does the router retry a failed generation against a different provider partway through streaming a response?",
+    "relevant_chunks": [
+      {
+        "anchor": "Once even one token has reached the client, a mid-stream failure from that provider is surfaced as a real, hard error",
+        "grade": "primary"
+      }
+    ],
+    "distractor_anchor": "it becomes eligible for another delivery attempt on the worker's next poll",
+    "notes": "Inverse of near-miss-01: the outbox's retry-on-next-poll behavior is a real, differently-scoped retry policy that shares vocabulary with the router's retry rule."
+  },
+  {
+    "id": "near-miss-03-budget-admission-estimate-source",
+    "case_class": "near_miss",
+    "query": "How exactly does Aether compute the pre-request cost estimate used to check a generation against budget limits?",
+    "relevant_chunks": [
+      {
+        "anchor": "a pre-request admission check using a conservative cost estimate: a local count of the prompt's tokens plus the request's maximum allowed completion tokens",
+        "grade": "primary"
+      }
+    ],
+    "distractor_anchor": "a separate, coarser pre-request estimate is computed from a local token count and a conservative worst-case per-thousand-token rate",
+    "notes": "The workspace-tenancy doc's Budget Admission Control section is the canonical, complete description; the router doc mentions the same underlying mechanism in passing while discussing cost accounting, using very similar wording."
+  },
+  {
+    "id": "near-miss-04-export-download-mechanism",
+    "case_class": "near_miss",
+    "query": "What mechanism does Aether use to let a workspace download a completed data export?",
+    "relevant_chunks": [
+      {
+        "anchor": "made available through the same object-storage-backed, presigned-URL download mechanism documents themselves are uploaded through",
+        "grade": "primary"
+      }
+    ],
+    "distractor_anchor": "the client requests a presigned upload URL scoped to a specific object key and a maximum allowed size",
+    "notes": "Both passages use \"presigned URL\" \u2014 one for upload (ingestion), one for the export's download (tenancy) \u2014 real shared terminology across two different directions of the same mechanism."
+  },
+  {
+    "id": "near-miss-05-deletion-async-job",
+    "case_class": "near_miss",
+    "query": "When a workspace owner requests deletion, does the workspace's data get purged immediately as part of that request?",
+    "relevant_chunks": [
+      {
+        "anchor": "Requesting deletion creates a tracked deletion job and marks the workspace accordingly, after which the workspace's data is actually purged asynchronously",
+        "grade": "primary"
+      }
+    ],
+    "distractor_anchor": "a message describing the new document is placed on an outbox for asynchronous processing rather than being processed synchronously as part of the original upload request",
+    "notes": "Both workspace deletion and document ingestion use the same asynchronous-job pattern, described with overlapping words (asynchronous/synchronously/job/request) in two different docs."
+  },
+  {
+    "id": "near-miss-06-always-zero-metric",
+    "case_class": "near_miss",
+    "query": "Which of Aether's real, live metrics is expected to read exactly zero during normal, healthy operation?",
+    "relevant_chunks": [
+      {
+        "anchor": "this metric's expected value in correct operation is exactly zero at all times",
+        "grade": "primary"
+      }
+    ],
+    "distractor_anchor": "that would leave a workspace with zero remaining Owners",
+    "notes": "The RLS-violation counter is the real live metric expected to be zero. Workspace ownership's \"zero remaining Owners\" is a policy rule, not a measured metric, but shares the word \"zero\" and appears in the same general governance-adjacent vocabulary."
+  },
+  {
+    "id": "near-miss-07-estimate-vs-settled-gap",
+    "case_class": "near_miss",
+    "query": "Where does Aether track the gap between a request's pre-request cost estimate and its actual settled cost?",
+    "relevant_chunks": [
+      {
+        "anchor": "the gap between pre-request estimated cost and actual settled cost, which is the signal for whether admission control's conservative estimate is running too far from reality",
+        "grade": "primary"
+      }
+    ],
+    "distractor_anchor": "Aether tracks the gap between the two as a deliberate signal for whether its estimation approach is running too conservative or too loose over time",
+    "notes": "The observability doc's cost dashboard is the more precise answer to \"where is this tracked\" (a dashboard panel); the tenancy doc describes the same underlying gap-tracking concept in the budgeting mechanism itself."
+  },
+  {
+    "id": "near-miss-08-failure-count-threshold",
+    "case_class": "near_miss",
+    "query": "What specific number does Aether use as a cutoff before treating repeated failures as a real, unhealthy problem?",
+    "relevant_chunks": [
+      {
+        "anchor": "After three consecutive failures against that specific provider, its breaker opens",
+        "grade": "primary"
+      }
+    ],
+    "distractor_anchor": "The constant added to the rank before dividing is set to sixty",
+    "notes": "Circuit breaker's three-failure threshold is the real answer to an unhealthy-provider question. RRF's constant of sixty is an unrelated numeric constant, but both are introduced as \"a constant\"/\"a number\" in nearby phrasing, a plausible lexical collision."
+  },
+  {
+    "id": "unanswerable-01-embedding-fine-tuning",
+    "case_class": "unanswerable_populated",
+    "query": "Does Aether support fine-tuning a custom embedding model on our own workspace documents?",
+    "relevant_chunks": []
+  },
+  {
+    "id": "unanswerable-02-custom-refusal-message",
+    "case_class": "unanswerable_populated",
+    "query": "Can a workspace configure a custom refusal message instead of Aether's default one?",
+    "relevant_chunks": []
+  },
+  {
+    "id": "unanswerable-03-workspace-count-limit",
+    "case_class": "unanswerable_populated",
+    "query": "What is the maximum number of workspaces a single user account is allowed to belong to?",
+    "relevant_chunks": []
+  },
+  {
+    "id": "unanswerable-04-multi-region",
+    "case_class": "unanswerable_populated",
+    "query": "Does Aether support deploying across multiple regions for lower latency to distant users?",
+    "relevant_chunks": []
+  },
+  {
+    "id": "unanswerable-05-audit-log-retention",
+    "case_class": "unanswerable_populated",
+    "query": "How long are audit log entries retained before they are deleted?",
+    "relevant_chunks": []
+  },
+  {
+    "id": "unanswerable-06-viewer-role-budget",
+    "case_class": "unanswerable_populated",
+    "query": "Can a workspace member with a Viewer role approve a budget increase?",
+    "relevant_chunks": []
+  },
+  {
+    "id": "unanswerable-07-duplicate-model-name-conflict",
+    "case_class": "unanswerable_populated",
+    "query": "What happens if two different workspaces configure a custom LLM model with the exact same name?",
+    "relevant_chunks": []
+  },
+  {
+    "id": "unanswerable-08-quarantine-vs-delete",
+    "case_class": "unanswerable_populated",
+    "query": "Does Aether's malware scanner quarantine infected files for manual review, or delete them immediately?",
+    "relevant_chunks": []
+  },
+  {
+    "id": "unanswerable-09-chat-p99-latency-target",
+    "case_class": "unanswerable_populated",
+    "query": "What is the specific p99 latency target for Aether's chat endpoint?",
+    "relevant_chunks": []
+  },
+  {
+    "id": "unanswerable-10-read-only-api-key",
+    "case_class": "unanswerable_populated",
+    "query": "Can an API key be scoped to read-only access, without permission to send chat messages?",
+    "relevant_chunks": []
+  }
+]
