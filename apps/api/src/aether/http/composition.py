@@ -17,6 +17,7 @@ from aether.adapters.anthropic.completion import AnthropicCompletionAdapter
 from aether.adapters.argon2.hasher import Argon2PasswordHasher
 from aether.adapters.clock import SystemClock
 from aether.adapters.echo.generator import EchoGenerator
+from aether.adapters.groq.completion import GroqCompletionAdapter
 from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.jwt.eddsa import EdDSATokenSigner
 from aether.adapters.llm.memory_compaction import LlmMemoryCompactionAdapter
@@ -622,7 +623,17 @@ def _build_generator(settings: Settings, *, clock: ClockPort) -> GeneratorPort:
     environments without SOPS-decrypted API keys fall back to
     EchoGenerator, exactly as S3 shipped. This is a real, honest
     fallback, not a silent stub: the meta event's ``model`` field always
-    reflects which generator actually answered (see GeneratorPort.primary_model)."""
+    reflects which generator actually answered (see GeneratorPort.primary_model).
+
+    Provider order below is also the fallback-chain order (LlmRouter
+    tries providers in ``model_chain`` order, skipping any with an open
+    circuit breaker) — OpenAI, then Anthropic, then Groq. Groq joins the
+    chain only when ``groq_api_key`` is actually configured, the same
+    "empty string is not a usable key" gate the other two providers
+    already use; a missing/empty key never instantiates a live
+    GroqCompletionAdapter, and Groq being unconfigured changes nothing
+    about how OpenAI/Anthropic (or the EchoGenerator fallback) behave.
+    """
     provider_configs: list[tuple[str, str, ProviderAdapterPort]] = []
     if settings.openai_api_key:
         provider_configs.append(
@@ -634,6 +645,18 @@ def _build_generator(settings: Settings, *, clock: ClockPort) -> GeneratorPort:
                 "anthropic",
                 "claude-haiku-4-5",
                 AnthropicCompletionAdapter(api_key=settings.anthropic_api_key),
+            )
+        )
+    if settings.groq_api_key:
+        provider_configs.append(
+            (
+                "groq",
+                settings.groq_model,
+                GroqCompletionAdapter(
+                    api_key=settings.groq_api_key,
+                    model=settings.groq_model,
+                    base_url=settings.groq_base_url,
+                ),
             )
         )
     if not provider_configs:

@@ -118,7 +118,7 @@ resume; a thin owned **LLM router** with fallback chains; and a CI-gated
 | Auth & tenant isolation | live (S1) — EdDSA-JWT + rotating refresh tokens, forced RLS, three-role DB privilege model |
 | Workspace CRUD, RBAC, audit log, email, rate limiting | live (S2) |
 | Streaming chat (SSE, cross-replica resume/cancel) + SPA | live (S3) |
-| LLM Router (OpenAI/Anthropic, breakers, fallback, concurrency limits) + usage/budget admission | live (S4) — falls back to S3's echo generator until real provider keys are provisioned |
+| LLM Router (OpenAI/Anthropic/Groq, breakers, fallback, concurrency limits) + usage/budget admission | live (S4, Groq added later) — falls back to S3's echo generator until real provider keys are provisioned |
 | Knowledge-base ingestion (schema, object storage, fair-queued pipeline, malware scan, chunking, embedding) + document CRUD & upload UI | live (S5) — falls back to a local, honest, non-semantic embedder until real provider keys are provisioned |
 | Grounded chat (hybrid retrieval + RRF/MMR, query rewrite, two-gate refusal, per-chunk citations) + citations/refusal UI | live (S6) — real end-to-end proof: a real ingested document produces a real cited answer, a real out-of-KB query refuses, both in a real browser |
 | Eval harness + golden set v1 (20 cases) + CI tiers (path-filtered smoke, nightly) | live (S7) — [latest real report](docs/evals/latest-report.md) |
