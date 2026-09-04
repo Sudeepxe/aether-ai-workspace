@@ -62,16 +62,21 @@ def test_groq_key_present_instantiates_a_real_groq_provider_in_the_router() -> N
 
 
 def test_groq_uses_the_configured_base_url_and_model() -> None:
+    # openai/gpt-oss-120b, not the default openai/gpt-oss-20b — proves
+    # composition.py actually threads settings.groq_model through rather
+    # than reading it and ignoring it. Must be a model with verified
+    # metadata (Phase 4, GroqCompletionAdapter._MODEL_METADATA) since
+    # construction now fails loudly on an unrecognized one.
     settings = Settings(
         groq_api_key="gsk_test",
-        groq_model="llama-3.1-8b-instant",
+        groq_model="openai/gpt-oss-120b",
         groq_base_url="https://custom.groq.example/openai/v1",
     )
     generator = _build_generator(settings, clock=_clock())
     assert isinstance(generator, LlmRouter)
     groq_adapter = generator._providers["groq"]
     assert isinstance(groq_adapter, GroqCompletionAdapter)
-    assert groq_adapter._model == "llama-3.1-8b-instant"
+    assert groq_adapter._model == "openai/gpt-oss-120b"
     assert groq_adapter._base_url == "https://custom.groq.example/openai/v1"
 
 
