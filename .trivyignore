@@ -49,7 +49,9 @@ CVE-2026-8376
 # caddy:latest, and caddy:2 are all byte-identical to the pinned digest;
 # caddy:2.10-alpine is strictly worse (same unfixed CVE plus additional
 # CRITICALs in its bundled Go binaries).
+# Tracked: https://github.com/Sudeepxe/aether-ai-workspace/issues/136
 # Revisit: bump the caddy:2-alpine pin as soon as an upstream image
 # ships golang.org/x/crypto >= 0.55.0, or immediately if Aether ever
-# gains a feature that runs an actual SSH server in this image.
+# gains a feature that runs an actual SSH server in this image (also
+# tracked in issue #136).
 CVE-2026-56854
