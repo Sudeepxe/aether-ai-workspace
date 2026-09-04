@@ -22,7 +22,6 @@ from aether.adapters.idgen import Uuid7Generator
 from aether.adapters.jwt.eddsa import EdDSATokenSigner
 from aether.adapters.llm.memory_compaction import LlmMemoryCompactionAdapter
 from aether.adapters.llm.query_rewrite import LlmQueryRewriteAdapter
-from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.local.noop_query_rewrite import NoOpQueryRewriteAdapter
 from aether.adapters.local.truncating_memory_compaction import (
     MODEL_NAME as TRUNCATING_MEMORY_COMPACTION_MODEL_NAME,
@@ -30,7 +29,6 @@ from aether.adapters.local.truncating_memory_compaction import (
 from aether.adapters.local.truncating_memory_compaction import TruncatingMemoryCompactionAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.adapters.openai.completion import OpenAiCompletionAdapter
-from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
 from aether.adapters.postgres.api_key_repository import PostgresApiKeyRepository
 from aether.adapters.postgres.audit_log import PostgresAuditLog
 from aether.adapters.postgres.budget_repository import PostgresBudgetRepository
@@ -111,6 +109,7 @@ from aether.app.workspaces.manage_members import ListMembers, RemoveMember, Upda
 from aether.app.workspaces.request_export import RequestWorkspaceExport
 from aether.app.workspaces.update_workspace import UpdateWorkspace
 from aether.config import Settings
+from aether.embedding_selection import build_embedder
 from aether.ports.audit import AuditLogPort
 from aether.ports.chat import GeneratorPort, MessageStorePort
 from aether.ports.embedding import EmbeddingProviderPort
@@ -509,7 +508,7 @@ async def build_container(settings: Settings) -> Container:
         secure=settings.object_storage_secure,
         bucket=settings.object_storage_bucket,
     )
-    embedder = _build_embedder(settings)
+    embedder = build_embedder(settings)
     query_rewriter = _build_query_rewriter(settings)
     chat_hybrid_search = HybridSearch(chunk_search=PooledChunkSearch(db_pool), embedder=embedder)
     chat_query_rewriter = QueryRewriter(rewriter=query_rewriter)
@@ -674,19 +673,6 @@ def _build_generator(settings: Settings, *, clock: ClockPort) -> GeneratorPort:
         max_tokens=settings.router_max_tokens,
         max_concurrent_per_provider=settings.router_max_concurrent_per_provider,
     )
-
-
-def _build_embedder(settings: Settings) -> EmbeddingProviderPort:
-    """Real OpenAI embeddings only if configured (mirrors workers/
-    composition.py's own ``_build_embedder``, issue #47) — dev/CI
-    environments without a SOPS-decrypted API key fall back to
-    LocalHashEmbeddingAdapter, a real and honest (if non-semantic)
-    embedder, not a silent stub. The API process needs its own instance
-    (query-time embedding for hybrid retrieval, issue #56) distinct
-    from the worker's (document-time embedding, issue #47)."""
-    if settings.openai_api_key:
-        return OpenAiEmbeddingAdapter(api_key=settings.openai_api_key)
-    return LocalHashEmbeddingAdapter()
 
 
 def _build_query_rewriter(settings: Settings) -> QueryRewritePort:

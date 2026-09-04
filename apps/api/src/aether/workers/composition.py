@@ -16,9 +16,7 @@ from aether.adapters.clock import SystemClock
 from aether.adapters.email.resend import ResendEmailAdapter
 from aether.adapters.email.smtp import SmtpEmailAdapter
 from aether.adapters.idgen import Uuid7Generator
-from aether.adapters.local.hash_embedding import LocalHashEmbeddingAdapter
 from aether.adapters.minio.object_storage import MinioObjectStorage
-from aether.adapters.openai.embedding import OpenAiEmbeddingAdapter
 from aether.adapters.postgres.cost_metrics_repository import PostgresCostMetricsRepository
 from aether.adapters.postgres.deletion_verification_repository import (
     PostgresDeletionVerificationRepository,
@@ -40,6 +38,7 @@ from aether.app.workspaces.build_export import DispatchWorkspaceExport
 from aether.app.workspaces.purge_workspace import DispatchWorkspaceDeletion
 from aether.app.workspaces.verify_deletions import VerifyWorkspaceDeletions
 from aether.config import Settings
+from aether.embedding_selection import build_embedder
 from aether.ports.cost_metrics import CostMetricsPort
 from aether.ports.deletion_verification import DeletionVerificationPort
 from aether.ports.email import EmailPort
@@ -111,17 +110,6 @@ def _build_email_adapter(settings: Settings) -> EmailPort:
     )
 
 
-def _build_embedder(settings: Settings) -> EmbeddingProviderPort:
-    """Real OpenAI embeddings only if configured (§3.2.4/§6.2's D6-3
-    pattern, mirroring http/composition.py's ``_build_generator``) —
-    dev/CI environments without a SOPS-decrypted API key fall back to
-    LocalHashEmbeddingAdapter, a real and honest (if non-semantic)
-    embedder, not a silent stub."""
-    if settings.openai_api_key:
-        return OpenAiEmbeddingAdapter(api_key=settings.openai_api_key)
-    return LocalHashEmbeddingAdapter()
-
-
 async def build_worker_container(settings: Settings) -> WorkerContainer:
     db_pool = await create_pool(settings.database_worker_url)
     redis_client = redis_asyncio.from_url(  # type: ignore[no-untyped-call]  # redis-py gap, not ours
@@ -146,7 +134,7 @@ async def build_worker_container(settings: Settings) -> WorkerContainer:
     )
     scanner = ClamAvScanner(host=settings.clamav_host, port=settings.clamav_port)
     ingestion_repository = PostgresIngestionRepository(db_pool)
-    embedder = _build_embedder(settings)
+    embedder = build_embedder(settings)
     ids = Uuid7Generator()
     workspace_deletion_repository = PostgresWorkspaceDeletionRepository(db_pool)
     workspace_export_repository = PostgresWorkspaceExportRepository(db_pool)
