@@ -35,10 +35,16 @@ async def ingest_corpus_files(
     worker_pool: asyncpg.Pool,
     object_storage: MinioObjectStorage,
     clamav_endpoint: tuple[str, int],
+    corpora_dir: Path = CORPORA_DIR,
 ) -> None:
     """Ingests each of a case's corpus files into ``workspace_id``,
     raising if any fails to reach ``ready`` — a golden case can't run
-    meaningfully against a corpus fixture that didn't actually land."""
+    meaningfully against a corpus fixture that didn't actually land.
+
+    ``corpora_dir`` defaults to v1's own ``evals/corpora/`` (unchanged
+    behavior for every existing caller) — Phase 5's v2 retrieval harness
+    passes ``evals/corpora/v2/`` instead, reusing this real ingestion
+    logic rather than duplicating it for a second corpus directory."""
     for filename in filenames:
         await _ingest_one(
             workspace_id=workspace_id,
@@ -47,6 +53,7 @@ async def ingest_corpus_files(
             worker_pool=worker_pool,
             object_storage=object_storage,
             clamav_endpoint=clamav_endpoint,
+            corpora_dir=corpora_dir,
         )
 
 
@@ -58,8 +65,9 @@ async def _ingest_one(
     worker_pool: asyncpg.Pool,
     object_storage: MinioObjectStorage,
     clamav_endpoint: tuple[str, int],
+    corpora_dir: Path = CORPORA_DIR,
 ) -> None:
-    path = CORPORA_DIR / filename
+    path = corpora_dir / filename
     content = path.read_bytes()
     mime = _MIME_BY_SUFFIX.get(path.suffix, "text/plain")
     document_id = uuid.uuid4()
