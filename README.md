@@ -169,6 +169,21 @@ deferred to Phase 3 · single-node demo topology (99.0% SLO tier, HA path
 documented) · best-effort on-call · no multi-region. Each carries a
 pre-committed upgrade trigger.
 
+**CI `build` job is red on a pre-existing base-image CVE, not a code
+defect.** `trivy` flags `CVE-2026-56854` (a CRITICAL SSH auth-bypass in
+`golang.org/x/crypto`) in the pinned `caddy:2-alpine` base image used by
+`infra/docker/web.Dockerfile`. This is not something Aether's own code
+triggers — Caddy doesn't run an SSH server in this deployment — but a
+CRITICAL finding still fails the scan gate. Checked for a fix before
+documenting this rather than assuming one doesn't exist: `docker pull
+caddy:2-alpine` resolves to the exact same image digest already pinned (no
+upstream rebuild yet), and `caddy:latest`/`caddy:2` are identical. The
+newer `caddy:2.10-alpine` was also scanned and is worse, not better — it
+still carries the same unfixed CVE plus additional CRITICALs in its bundled
+Go binaries. No patched tag exists upstream as of 2026-09-04. **Revisit:**
+re-scan `caddy:2-alpine` for this CVE the next time `infra/docker/web.Dockerfile`
+is touched, or periodically; bump the pin as soon as a fix ships.
+
 ## License · Security · Contributing
 
 [Apache-2.0](LICENSE) · [SECURITY.md](SECURITY.md) · [CONTRIBUTING.md](CONTRIBUTING.md)
