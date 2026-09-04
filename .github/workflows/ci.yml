@@ -302,6 +302,7 @@ jobs:
             apps/api/src/aether/app/chat apps/api/src/aether/app/ingestion/chunking.py \
             apps/api/src/aether/adapters/echo apps/api/src/aether/adapters/openai \
             apps/api/src/aether/adapters/anthropic apps/api/src/aether/adapters/local \
+            apps/api/src/aether/adapters/groq apps/api/src/aether/adapters/openai_compatible \
             apps/api/src/aether/config.py evals"
           if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
