@@ -110,6 +110,17 @@ RLS_VIOLATION_TOTAL = Counter(
     "security invariant violation, should be exactly 0 in normal operation",
 )
 
+LLM_SYSTEM_PROMPT_LEAK_BLOCKED_TOTAL = Counter(
+    "aether_llm_system_prompt_leak_blocked_total",
+    "Generations aborted mid-stream because the reply contained a verbatim "
+    "span of the system prompt (Phase 7 mitigation, docs/REMEDIATION_PLAN.md) — "
+    "a real, reproduced exfiltration finding, not a hypothetical alert. Nonzero "
+    "means an attempt got far enough to be caught, not that none occur; a "
+    "sustained nonzero rate is worth investigating, not silence-by-design like "
+    "RLS_VIOLATION_TOTAL above.",
+    labelnames=("provider",),
+)
+
 RETRIEVAL_VECTOR_DEGRADATION_TOTAL = Counter(
     "aether_retrieval_vector_degradation_total",
     "Hybrid retrieval's vector leg degrading to lexical-only (§3.2.5 "
