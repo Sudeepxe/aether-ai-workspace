@@ -162,12 +162,123 @@ GitHub milestones S0–S12 mirror the blueprint's implementation roadmap
 grounded chat → **evals** → memory/deletion → observability → hardening →
 prod/DR → v1.0 (production-readiness review).
 
+## Cost, latency, and index lifecycle
+
+**Cost per 1000 queries: ≈$0.106 (Groq, `openai/gpt-oss-20b`), real
+pricing × real observed usage.** Phase 4 of `docs/REMEDIATION_PLAN.md`
+verified this model's per-token pricing directly against Groq's own
+published docs: $0.075/1M input, $0.30/1M output tokens (7,500/30,000
+microcents per 1K tokens, `apps/api/src/aether/adapters/groq/completion.py`).
+Applied to real observed token usage from this engagement's own live
+runs — average prompt tokens ≈405 (Phase 7 RUN 1, 6 real single-chunk
+grounded requests) and average completion tokens ≈251 (Phase 7 RUN 2, 38
+real full chat-turn completions) — that's ≈10,578 microcents (≈$0.0001058)
+per query, ≈$0.106 per 1000 queries. Stated honestly, not overclaimed:
+the prompt-token average comes from single-retrieved-chunk fixtures,
+while a real production turn retrieves up to 6 chunks (ADR-6.3) — real
+production prompt tokens, and therefore real cost per query, are likely
+higher than this figure for a typical grounded turn. Not yet
+re-measured against a full 6-chunk context; treat this as a directional
+estimate from real numbers, not a production SLA figure.
+
+**Latency, per-stage (embed → retrieve → generate): `TBD — not yet
+measured`.** No per-stage latency benchmark has been run against this
+pipeline in this environment; this repo's real, measured latency data is
+either end-to-end (the Devon-persona quickstart's real ~6.5s cold-start
+round trip, S10) or coarser-grained (k6 perf budgets, `infra/k6/`,
+measuring whole-endpoint p95 in CI, not a breakdown by pipeline stage).
+Producing a real per-stage number requires running and observing a new
+benchmark — not done as part of this documentation phase, so the honest
+value here is `TBD`, not a fabricated split of the end-to-end figure.
+
+**Index lifecycle:** a new document's chunks are created fresh by the
+real ingestion pipeline (parse → chunk → embed) on every upload;
+deleting a document hard-deletes its chunks in the same transaction via
+a DB-level `ON DELETE CASCADE` (`chunks.document_id REFERENCES
+documents(id) ON DELETE CASCADE`) — real, DB-enforced, and independently
+verified by the S8 deletion-verification job's real residue sweep.
+Vectors are treated as **derived data** (ADR-2.3), not source of truth:
+re-embedding a chunk means nulling its `embedding`/`embedding_model`/
+`embedding_version` columns and re-running the real embedding adapter
+against the already-stored `chunks.content` — proven for real in the
+Sprint 11 restore drill (`apps/api/scripts/verify_restore_drill.py`'s
+`_rebuild_vectors`), timed against the DR RTO budget. There is no
+incremental, partial-diff re-indexing path today — updating a document's
+content means deleting and re-uploading it (a full re-chunk-and-embed of
+that document); a global re-embed (e.g., migrating to a new embedding
+model) is a full rebuild across every existing chunk row, not an
+incremental one.
+
+**Scale ceiling, with a specific reason:** this design's measured
+retrieval numbers do not extend past roughly this corpus's own size — 6
+documents, 14-37 chunks depending on chunking config — without
+re-validation, and the reason is concrete, not vague: Phase 6's own
+sweep found the *larger*-chunk configuration's apparently-better 90.0%
+recall@10 (vs. 66.2% baseline) was measured at only 14 total chunks,
+close enough to "one chunk per document" that the retrieval task is
+nearly reduced to document selection rather than genuine passage
+retrieval — a small-corpus artifact risk stated plainly in
+`evals/golden/v2/PHASE6_RESULTS.md`, not resolved. Underlying that
+ceiling is a second, harder constraint: the same phase's RRF-constant
+and MMR-λ sweeps found the vector retrieval leg contributes no
+measurable signal under the only embedder configured in this
+environment (`LocalHashEmbeddingAdapter` — real but non-semantic) — so
+at any corpus larger or more topically diverse than this one, retrieval
+quality currently rests entirely on the lexical (full-text search) leg
+and Gate 2's generation-time refusal, not on genuine semantic retrieval,
+until a real embedding model is configured (ADR-8.4).
+
 ## Limitations & gap register
 
 Deliberate v1 boundaries, published not hidden (Blueprint §10.6): MFA
 deferred to Phase 3 · single-node demo topology (99.0% SLO tier, HA path
 documented) · best-effort on-call · no multi-region. Each carries a
 pre-committed upgrade trigger.
+
+**Findings from this engagement's real-provider and real-data validation
+(docs/REMEDIATION_PLAN.md), stated plainly:**
+
+- **The only embedder configured in this environment is non-semantic**
+  (`LocalHashEmbeddingAdapter`, a real deterministic hash expansion of a
+  text's own bytes, not a trained embedding model). Every retrieval
+  recall/precision number in `evals/golden/v2/README.md` (Phase 5) and
+  `evals/golden/v2/PHASE6_RESULTS.md` (Phase 6)
+  is real and measured under this constraint — reported as a **lower
+  bound** on what a real semantic embedder (all-MiniLM-L6-v2 or an
+  OpenAI/Anthropic embedding model) would achieve, not a ceiling. ADR-8.4
+  gates that migration on this exact recall-verification work.
+- **A real system-prompt exfiltration vulnerability was found and
+  mitigated, not eliminated.** 3 of 4 real trials against
+  `openai/gpt-oss-20b` returned the live system prompt verbatim (Phase
+  7). Two independent layers now reduce this — a non-disclosure clause
+  plus an output-side verbatim-span detector — and a real 6-trial
+  re-test measured 0 of 6 full leaks reaching the caller. **Residual
+  risk, stated honestly:** a short prefix (up to ~50 characters) can
+  still reach the caller before detection fires (confirmed in 4 of those
+  6 trials), and a paraphrase/translation-style attack that avoids a
+  contiguous verbatim match was not tested. See
+  `evals/golden/v2/PHASE7_MITIGATION_RESULTS.md` for the full data,
+  design rationale, and an honest severity assessment of the prompt
+  content itself.
+- **7 of 10 `unanswerable_populated` queries in Phase 7's real-provider
+  run could not be run at all** — the Groq free-tier account's daily
+  token quota (200,000 tokens/day, a separate and harder limit than the
+  per-minute rate limit, which was handled correctly throughout with
+  real exponential backoff) was exhausted partway through the session.
+  Gate 2's refusal-correctness result against real generation (2 of 3
+  completed) is real but does not generalize from 3 data points; the
+  other 7 remain honestly unrun, not silently dropped
+  (`evals/golden/v2/PHASE7_RESULTS.md`).
+- **Faithfulness is validated against a single provider family only.**
+  Every real chat-turn faithfulness check in Phase 7 (35/35) correctly
+  returned `not_measured`, exactly as ADR-6.5 designs for an environment
+  with only Groq configured — this is the intended behavior for a
+  single-provider setup, not a bug, but it means faithfulness has never
+  been measured against real generation in this environment, and no
+  cross-family (e.g., Groq-generates / OpenAI-judges) validation has
+  occurred. See `docs/TRADE_OFFS.md` for why an authenticated
+  second-provider CI smoke test is a deliberate absence, not an
+  oversight.
 
 **`CVE-2026-56854` in `caddy:2-alpine` is an accepted, documented risk, not
 an unexplained red badge.** `trivy` flags this CRITICAL SSH auth-bypass in
