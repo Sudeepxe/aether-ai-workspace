@@ -3,8 +3,12 @@
 [![ci](https://github.com/Sudeepxe/aether-ai-workspace/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sudeepxe/aether-ai-workspace/actions/workflows/ci.yml)
 
 **A production-grade, multi-tenant AI workspace platform** — RAG-grounded
-chat over private knowledge bases, with measured faithfulness *and* measured
-refusal. Built end-to-end by one engineer as an architecture-first flagship:
+chat over private knowledge bases, with measured retrieval and refusal
+correctness (100%, real eval run — see Proof table below). **Faithfulness is
+explicitly not measured in this environment**, honestly reported as such
+throughout — it needs a real cross-family LLM judge key that isn't
+configured here. Built end-to-end by one engineer as an architecture-first
+flagship:
 the AI features are one subsystem inside a real production application
 (auth, tenancy, budgets, audit, observability, DR) — not the whole app.
 
