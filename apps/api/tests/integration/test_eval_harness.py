@@ -20,6 +20,7 @@ from httpx import ASGITransport, AsyncClient
 
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.config import get_settings
+from aether.embedding_selection import build_embedder
 
 pytestmark = pytest.mark.integration
 
@@ -93,6 +94,7 @@ async def test_the_harness_scores_a_real_answerable_and_a_real_unanswerable_case
         worker_pool=worker_db_pool,
         object_storage=object_storage,
         clamav_endpoint=clamav_endpoint,
+        embedder=build_embedder(get_settings()),
     )
     assert [r.error for r in results] == [None, None], [r.error for r in results]
 

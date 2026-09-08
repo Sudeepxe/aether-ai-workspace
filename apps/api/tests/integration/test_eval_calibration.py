@@ -18,6 +18,7 @@ from evals.harness.schema import load_golden_set
 
 from aether.adapters.minio.object_storage import MinioObjectStorage
 from aether.config import get_settings
+from aether.embedding_selection import build_embedder
 
 pytestmark = pytest.mark.integration
 
@@ -31,6 +32,7 @@ async def test_the_configured_threshold_stays_below_every_real_golden_set_positi
     clamav_endpoint: tuple[str, int],
 ) -> None:
     cases = load_golden_set(_GOLDEN_DIR)
+    settings = get_settings()
 
     samples = await _collect_positive_scores(
         cases,
@@ -38,11 +40,12 @@ async def test_the_configured_threshold_stays_below_every_real_golden_set_positi
         worker_pool=worker_db_pool,
         object_storage=object_storage,
         clamav_endpoint=clamav_endpoint,
+        embedder=build_embedder(settings),
     )
 
     assert samples, "the golden set must have at least one grounded turn to calibrate against"
     weakest = min(s.top_score for s in samples)
-    threshold = get_settings().retrieval_refusal_threshold
+    threshold = settings.retrieval_refusal_threshold
     assert threshold < weakest, (
         f"configured threshold {threshold} is not safely below the weakest real "
         f"golden-set positive score {weakest} — rerun evals/harness/calibrate.py"
