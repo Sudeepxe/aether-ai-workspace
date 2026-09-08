@@ -54,7 +54,25 @@ def parse_markdown(content: bytes) -> list[DocumentNode]:
     return nodes
 
 
+# Finding #9 (docs/RAG_AUDIT_REPORT_V2.md), known since Phase 5
+# (evals/golden/v2/README.md's own known-limitations section): a
+# softbreak/hardbreak child token is markdown-it-py's structural marker
+# for "there was a line break here" — it carries no text of its own
+# (child.content == "" for both, confirmed directly against the real
+# parser's token stream), so joining every child's .content with ""
+# silently swallowed the space (softbreak, a manually-wrapped source
+# line) or line break (hardbreak, a trailing-double-space break) it
+# represents — "short\nlifetime" extracted as "shortlifetime". Every
+# other structural token (strong_open/close, link_open/close, ...) is
+# correctly zero-width and needs no special case; only these two
+# represent rendered whitespace that .content doesn't carry.
+_BREAK_TOKEN_TYPES = frozenset({"softbreak", "hardbreak"})
+
+
 def _plain_text(inline_token: Token) -> str:
     if not inline_token.children:
         return inline_token.content
-    return "".join(child.content for child in inline_token.children)
+    return "".join(
+        " " if child.type in _BREAK_TOKEN_TYPES else child.content
+        for child in inline_token.children
+    )
