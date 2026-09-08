@@ -303,6 +303,8 @@ jobs:
             apps/api/src/aether/adapters/echo apps/api/src/aether/adapters/openai \
             apps/api/src/aether/adapters/anthropic apps/api/src/aether/adapters/local \
             apps/api/src/aether/adapters/groq apps/api/src/aether/adapters/openai_compatible \
+            apps/api/src/aether/adapters/postgres/chunk_search.py \
+            apps/api/src/aether/embedding_selection.py apps/api/src/aether/ports/retrieval.py \
             apps/api/src/aether/config.py evals"
           if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
