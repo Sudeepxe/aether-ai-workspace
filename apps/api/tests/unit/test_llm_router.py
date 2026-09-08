@@ -400,10 +400,14 @@ async def test_grounded_context_is_delivered_in_the_final_user_message_inside_th
     ) < final_user_message.content.index("what does it cost?")
 
 
-async def test_memory_summary_is_appended_to_the_system_prompt_when_present() -> None:
-    """Issue #82's §6 layered assembly: a rolling compaction summary
-    (whatever fell outside the token-budgeted window) gets folded into
-    the system prompt so the model can still draw on it."""
+async def test_memory_summary_is_folded_into_the_user_message_not_the_system_prompt() -> None:
+    """Finding #1 (docs/RAG_AUDIT_REPORT_V2.md): a rolling compaction
+    summary (whatever fell outside the token-budgeted window) used to be
+    appended straight onto the system prompt. It now gets the same
+    envelope treatment as retrieved context — delimited, in the user
+    message — never the system prompt. See test_memory_persistence.py
+    for the adversarial coverage that actually proves this holds for
+    injected content, not just this happy-path shape."""
     provider = FakeProviderAdapter(name="fake", chunks=["ok"])
     router, _ = _router(providers={"fake": provider}, model_chain=[("fake", "fake-model")])
     context = RetrievedContext(chunks=[])
@@ -417,7 +421,9 @@ async def test_memory_summary_is_appended_to_the_system_prompt_when_present() ->
         pass
 
     system_message = provider.calls[0].messages[0]
-    assert "Earlier, the user asked about Acme's refund policy." in system_message.content
+    user_message = provider.calls[0].messages[-1]
+    assert "Earlier, the user asked about Acme's refund policy." not in system_message.content
+    assert "Earlier, the user asked about Acme's refund policy." in user_message.content
 
 
 async def test_no_memory_summary_leaves_the_system_prompt_unchanged() -> None:
@@ -429,7 +435,9 @@ async def test_no_memory_summary_leaves_the_system_prompt_unchanged() -> None:
         pass
 
     system_message = provider.calls[0].messages[0]
+    user_message = provider.calls[0].messages[-1]
     assert "Earlier conversation summary" not in system_message.content
+    assert "AETHER_CONVERSATION_SUMMARY" not in user_message.content
 
 
 async def test_grounded_context_with_no_chunks_still_uses_the_grounded_prompt() -> None:
