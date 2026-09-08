@@ -4,13 +4,23 @@ per ADR-6.1 ("no orchestration framework for the core pipeline") — the
 same pure-algorithm-over-a-port shape as app/ingestion/chunking.py.
 
 RRF constant (k=60) and MMR's diversity weight (lambda=0.5) aren't
-specified by ADR-6.3 (it names the techniques, not their parameters) —
-these are deliberate, documented MVP defaults, not derived from real
-eval data (Sprint 7's golden set doesn't exist yet). k=60 is RRF's
-conventional default across the IR literature; lambda=0.5 weights
-relevance and diversity equally as a neutral starting point. Both are
-module constants, easy to promote to config once Sprint 7 has evidence
-to tune them against.
+specified by ADR-6.3 (it names the techniques, not their parameters).
+They started as undocumented MVP defaults with no eval set to check
+them against; that's no longer true. A real sweep against the v2
+golden set (evals/golden/v2/PHASE6_RESULTS.md, Priority 4) tested RRF
+in {10, 60, 100} and MMR lambda in {0.5, 1.0} and found *identical*
+retrieval metrics across every value — a genuine null result, not an
+untested default. That result comes with a real, stated limit, not a
+license to stop looking: it was measured under the only embedder
+configured in this environment (LocalHashEmbeddingAdapter, a real but
+non-semantic hash expansion), where the vector leg's cosine scores
+carry no real relevance signal — so changing how strongly RRF/MMR
+weight that leg doesn't move the outcome, because the noise was never
+driving it. A real semantic embedder is the prerequisite for this null
+result to say anything about the parameters themselves rather than
+about this embedder. k=60/lambda=0.5 are kept as reasonable IR-
+literature/neutral-weighting defaults on that basis — not because
+either was shown optimal, and not because tuning was skipped.
 """
 
 from __future__ import annotations
