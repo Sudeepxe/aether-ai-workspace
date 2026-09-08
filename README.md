@@ -111,7 +111,9 @@ from one codebase) with lint-enforced hexagonal boundaries; **PostgreSQL +
 pgvector** with row-level-security tenant isolation; **Redis Streams + a
 transactional outbox** for eventing; **SSE streaming** with cross-replica
 resume; a thin owned **LLM router** with fallback chains; and a CI-gated
-**eval harness** (faithfulness ∧ correct-refusal ≥ 90% target).
+**eval harness** (faithfulness ∧ correct-refusal ≥ 90% target). Full
+measurement record, every number with its reproduce command and
+constraint: [`docs/EVALUATION_REPORT.md`](docs/EVALUATION_REPORT.md).
 
 ## Proof (lights up as sprints land)
 
