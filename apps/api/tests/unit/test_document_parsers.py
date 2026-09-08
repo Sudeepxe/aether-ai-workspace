@@ -149,6 +149,33 @@ def test_markdown_parser_rejects_empty_content() -> None:
         parse_markdown(b"   \n\n   ")
 
 
+def test_markdown_parser_preserves_the_space_at_a_manually_wrapped_line_break() -> None:
+    """Finding #9 (docs/RAG_AUDIT_REPORT_V2.md), known since Phase 5
+    (evals/golden/v2/README.md): a paragraph manually hard-wrapped across
+    multiple source lines used to lose the space at each wrap point —
+    "short\\nlifetime" extracted as "shortlifetime". The v2 corpus was
+    reflowed to single-line paragraphs specifically to route around this;
+    this fixture is the shape that bug needed and the corpus avoided."""
+    md = b"This is a short\nlifetime that wraps across\nmultiple source lines.\n"
+
+    nodes = parse_markdown(md)
+
+    assert nodes[0].text == "This is a short lifetime that wraps across multiple source lines."
+
+
+def test_markdown_parser_preserves_the_break_at_a_hard_line_break() -> None:
+    """A trailing-double-space hard break (renders as <br>, not just a
+    space) is a distinct CommonMark token (hardbreak) from a soft-wrapped
+    line (softbreak) — both carry no text of their own and both need the
+    same fix, so both get their own case rather than assuming one implies
+    the other."""
+    md = b"Line one.  \nLine two.\n"
+
+    nodes = parse_markdown(md)
+
+    assert nodes[0].text == "Line one. Line two."
+
+
 # --------------------------------------------------------------------- HTML --
 
 
