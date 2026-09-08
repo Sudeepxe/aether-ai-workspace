@@ -71,12 +71,13 @@ finalizing the golden set — see `answerable-05-key-rotation-overlap`'s
 `notes` field for the clearest example). Retrieval is scored as correct
 if *either* copy is found.
 
-## Real results (this run, this environment, 2026-09-04)
+## Real results (this run, this environment, 2026-09-04; recall@6 added 2026-09-08, Finding #8, docs/RAG_AUDIT_REPORT_V2.md)
 
 ```
 --- answerable (35 queries) ---
 recall@5:   59.5%
-recall@10:  66.2%
+recall@6:   59.5%  (production-equivalent — hybrid_search.py's real _DEFAULT_K)
+recall@10:  66.2%  (diagnostic only — not what a real chat turn sends to generation)
 MRR:        56.6%
 NDCG@10:    57.2%
 
@@ -95,6 +96,21 @@ than v1's 100%. That is the intended outcome of rebuilding this set with
 genuinely harder material, not a regression: a perfect score here would
 mean the eval set is still too easy, the same conclusion the audit
 reached about v1.
+
+**Recall@10 was the headline number reported here until Finding #8
+flagged it as diagnostic-only, not production-equivalent** — a real
+chat turn only ever sends `hybrid_search.py`'s real `_DEFAULT_K=6`
+chunks to generation, never 10. recall@6 is now reported alongside it,
+computed from the same ranked list (no second retrieval call — MMR
+selection is strictly greedy, so its first 6 picks are identical
+whether 6 or 10 were requested, verified against `_mmr_select`'s own
+loop structure). At this corpus, the gap is real, not rounding: **59.5%
+at the k a real turn actually uses, versus 66.2% at the k=10 this
+report led with** — the two additional slots recall@10 credits (ranks
+6-10) capture relevant chunks recall@6 doesn't. recall@10/MRR/NDCG@10
+remain useful for comparing configurations (Phase 6's sweeps use them
+that way), but recall@6 is the one that answers "what would a user
+actually get."
 
 **Environment caveat, stated plainly:** no real embedding provider key
 is configured in this environment, so the vector leg runs on

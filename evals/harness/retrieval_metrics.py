@@ -33,6 +33,19 @@ class QueryMetrics:
     recall_at_5: float | None
     """Fraction of this query's relevant chunks found in the top 5.
     None for unanswerable_populated (nothing to recall)."""
+    recall_at_6: float | None
+    """Finding #8 (docs/RAG_AUDIT_REPORT_V2.md): recall@10 is a useful
+    diagnostic, but apps/api/src/aether/app/retrieval/hybrid_search.py's
+    _DEFAULT_K=6 is what a real chat turn actually sends to generation —
+    this is the production-equivalent number. Computed from the same
+    ranked list recall@10 is (this harness already retrieves 10
+    candidates, evals/harness/retrieval_runner.py's _RETRIEVAL_K), not a
+    second call: HybridSearch's MMR selection is strictly greedy/
+    incremental (app/retrieval/hybrid_search.py's _mmr_select loop picks
+    one best-remaining candidate per iteration, independent of the
+    target k), so its first 6 selections are identical whether k=6 or
+    k=10 was requested — verified directly against that loop's
+    structure, not assumed. None for unanswerable_populated."""
     recall_at_10: float | None
     mrr: float | None
     """Reciprocal rank of the first relevant chunk found, over the
@@ -98,6 +111,7 @@ def score_query(
             query_id=query.id,
             case_class=query.case_class,
             recall_at_5=None,
+            recall_at_6=None,
             recall_at_10=None,
             mrr=None,
             ndcg_at_10=None,
@@ -132,6 +146,7 @@ def score_query(
         query_id=query.id,
         case_class=query.case_class,
         recall_at_5=_recall_at(5),
+        recall_at_6=_recall_at(6),
         recall_at_10=_recall_at(10),
         mrr=mrr,
         ndcg_at_10=ndcg,
@@ -146,6 +161,9 @@ def score_query(
 class AggregateRetrievalMetrics:
     total_queries: int
     answerable_recall_at_5: float | None
+    answerable_recall_at_6: float | None
+    """Finding #8: the production-equivalent recall, k=6 — see
+    QueryMetrics.recall_at_6."""
     answerable_recall_at_10: float | None
     answerable_mrr: float | None
     answerable_ndcg_at_10: float | None
@@ -180,6 +198,9 @@ def aggregate(metrics: list[QueryMetrics]) -> AggregateRetrievalMetrics:
         total_queries=len(metrics),
         answerable_recall_at_5=_mean(
             [m.recall_at_5 for m in answerable if m.recall_at_5 is not None]
+        ),
+        answerable_recall_at_6=_mean(
+            [m.recall_at_6 for m in answerable if m.recall_at_6 is not None]
         ),
         answerable_recall_at_10=_mean(
             [m.recall_at_10 for m in answerable if m.recall_at_10 is not None]
