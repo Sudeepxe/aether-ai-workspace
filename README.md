@@ -283,6 +283,22 @@ pre-committed upgrade trigger.
   occurred. See `docs/TRADE_OFFS.md` for why an authenticated
   second-provider CI smoke test is a deliberate absence, not an
   oversight.
+- **At least two source-code comments written during this remediation
+  asserted security-relevant claims that had never actually been
+  verified when written.** One claimed a compacted conversation summary
+  was "not attacker-influenced" — false, as the code stood at the time:
+  it reached the system prompt through a compaction call with no
+  envelope of its own, the same injection path already closed for
+  retrieved documents (since fixed). The other claimed a blocked
+  generation's provider usage frame "is never reached" — also not true
+  as stated, true only as a description of the code's own choice to
+  stop reading, not an inherent constraint of streaming (since fixed).
+  Both were written in the same confident, reasoned prose as the
+  genuinely verified claims sitting next to them in the same files, and
+  neither was caught by the work that wrote it, by any test at the
+  time, or by self-review — both were caught later, by an independent
+  audit. This is a real finding about how this repository was built,
+  not just what it currently contains.
 
 **`CVE-2026-56854` in `caddy:2-alpine` is an accepted, documented risk, not
 an unexplained red badge.** `trivy` flags this CRITICAL SSH auth-bypass in
