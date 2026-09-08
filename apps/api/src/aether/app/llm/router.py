@@ -339,6 +339,17 @@ class LlmRouter:
                                 ),
                                 model=model,
                             )
+                        elif leak_intervened:
+                            # Finding #3 (docs/RAG_AUDIT_REPORT_V2.md): the
+                            # intervention message already went out below;
+                            # this branch keeps draining the same provider
+                            # stream afterward, unrelayed, so a trailing
+                            # ProviderUsage chunk (the `if` above, not this
+                            # branch) still reaches us instead of being
+                            # lost when the connection would otherwise
+                            # close. See that branch below for why not
+                            # just `break` instead.
+                            pass
                         else:
                             accumulated_reply += chunk
                             if _reply_leaks_system_prompt(accumulated_reply, active_system_prompt):
@@ -352,22 +363,39 @@ class LlmRouter:
                                 # check fired (up to
                                 # _SYSTEM_PROMPT_LEAK_THRESHOLD_CHARS
                                 # worth) already reached the caller — a
-                                # live SSE stream can't un-send tokens,
-                                # so this reduces exposure, it does not
-                                # guarantee zero exposure. No
-                                # GenerationUsage will follow (the
-                                # provider's real usage frame is never
-                                # reached), so this turn settles at zero
-                                # cost — deliberate: fabricating an
-                                # estimated cost for an aborted call
-                                # would be a worse dishonesty than an
-                                # unsettled one.
+                                # live SSE stream can't un-send tokens, so
+                                # this reduces exposure, it does not
+                                # guarantee zero exposure.
                                 text_sent = True
                                 leak_intervened = True
                                 yield _LEAK_INTERVENTION_MESSAGE
-                                break
-                            text_sent = True
-                            yield chunk
+                                # Deliberately not `break`: the provider
+                                # already generated, and billed for, every
+                                # token up to wherever *it* stops, whether
+                                # or not we relay it — `break` would close
+                                # this response before its trailing usage
+                                # chunk arrives (verified directly against
+                                # the wire format, adapters/openai_compatible/completion.py:
+                                # usage is the *last* SSE item, after all
+                                # remaining content deltas, same response).
+                                # Continuing lets the `elif leak_intervened`
+                                # branch above keep draining, unrelayed,
+                                # until that chunk shows up (real cost gets
+                                # recorded) or the stream ends without one
+                                # — the same honest zero-usage fallback an
+                                # ordinary truncated reply already gets
+                                # (PHASE7_RESULTS.md's reasoning-exhaustion
+                                # case). Bounded by the same client timeout
+                                # every call here already has; if it fires,
+                                # `text_sent` is already True, so the
+                                # `except ProviderError` below re-raises
+                                # rather than retrying — the existing
+                                # "retry only before the first streamed
+                                # token" rule this function already
+                                # documents above, unchanged.
+                            else:
+                                text_sent = True
+                                yield chunk
                 if leak_intervened:
                     LLM_SYSTEM_PROMPT_LEAK_BLOCKED_TOTAL.labels(provider=provider_name).inc()
                 return
