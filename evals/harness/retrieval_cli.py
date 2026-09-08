@@ -56,7 +56,12 @@ def _print_summary(
     print("")
     print("--- answerable ---")
     print(f"recall@5:   {_fmt(agg.answerable_recall_at_5)}")
-    print(f"recall@10:  {_fmt(agg.answerable_recall_at_10)}")
+    print(
+        f"recall@6:   {_fmt(agg.answerable_recall_at_6)}  (production-equivalent — hybrid_search.py's real _DEFAULT_K)"
+    )
+    print(
+        f"recall@10:  {_fmt(agg.answerable_recall_at_10)}  (diagnostic only — not what a real chat turn sends to generation)"
+    )
     print(f"MRR:        {_fmt(agg.answerable_mrr)}")
     print(f"NDCG@10:    {_fmt(agg.answerable_ndcg_at_10)}")
     print("")
@@ -181,7 +186,7 @@ async def _run(
         for m in per_query:
             print(
                 f"{m.query_id} [{m.case_class.value}] "
-                f"recall@5={m.recall_at_5} recall@10={m.recall_at_10} mrr={m.mrr} "
+                f"recall@5={m.recall_at_5} recall@6={m.recall_at_6} recall@10={m.recall_at_10} mrr={m.mrr} "
                 f"ndcg@10={m.ndcg_at_10} top_score={m.top_fused_score:.5f} "
                 f"would_refuse={m.would_refuse} distractor_rank={m.distractor_rank} "
                 f"relevant_ranks={m.relevant_ranks}"
