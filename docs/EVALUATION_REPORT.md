@@ -92,7 +92,10 @@ only ever sends the real `_DEFAULT_K=6` chunks to generation
 genuinely useful diagnostic for comparing configurations (section 3
 uses it that way) but overstates what a user's actual answer is
 grounded on. At this corpus, the gap is real: 59.5% vs. 66.2%, not
-rounding noise.
+rounding noise. recall@5 and recall@6 match exactly (not a copy-paste
+error) because no answerable query in this golden set has a relevant
+chunk landing precisely at rank 6, so widening the cutoff from 5 to 6
+finds nothing new at this corpus size.
 
 ### Near-miss (8 queries)
 
