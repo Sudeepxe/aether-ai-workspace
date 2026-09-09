@@ -38,6 +38,10 @@ infra/secrets/decrypted/
 # holds COMMITTED generated files (OpenAPI spec, TS types) because ADR-9.2
 # requires the generated contract to be committed and diffed in CI.
 docs/architecture/rendered/
+# Locally-rendered portfolio artifacts (e.g. docs/EVALUATION_REPORT.md's
+# PDF render) — regenerated on demand, not a source-of-truth file, and
+# not meant to accumulate as binary diffs in history.
+outputs/
 
 # ---- Docker ----------------------------------------------------------------
 compose.override.yml
